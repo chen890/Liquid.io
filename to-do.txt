@@ -1,0 +1,69 @@
+EquityLens — Project To-Do List
+Last updated: 2026-06-02
+========================================
+
+IN PROGRESS
+-----------
+[ ] E*TRADE / Morgan Stanley at Work Integration
+    - OAuth 1.0a PIN flow scaffolded (server/etrade.py + Settings UI)
+    - Requires Consumer Key + Secret from https://developer.etrade.com (1-day approval)
+    - Pending: test against live E*TRADE sandbox account
+    - Pending: auto-reconcile synced positions with existing grants
+
+PLANNED — AI & EXTRACTION
+--------------------------
+[ ] Improve extraction accuracy for brokerage-specific table layouts
+      (Morgan Stanley "Potential Restricted Stock", Fidelity NetBenefits, Carta, Shareworks)
+[ ] Add vesting cliff detection from grant text
+[ ] Support multi-page grant PDFs with split tables across pages
+[ ] Add extraction confidence audit trail in Review screen
+[ ] Support DOCX/XLSX grant exports from Carta and Shareworks directly
+
+PLANNED — DATA & INTEGRATIONS
+------------------------------
+[ ] E*TRADE API live sync (see above)
+[ ] Fidelity NetBenefits API or CSV auto-import
+[ ] Carta OAuth integration (https://developer.carta.com)
+[ ] Shareworks export parser
+[ ] Morgan Stanley at Work account link
+[ ] TD Ameritrade / Schwab equity compensation import
+[ ] Interactive Brokers IBKR position sync
+
+PLANNED — ANALYTICS & TAX
+--------------------------
+[ ] Israeli capital gains tax calculator (25% on post-vesting gain — meitav.co.il rules)
+      - Added: see src/components/views/WhatIfView.tsx "Tax" tab
+[ ] US capital gains tax (LTCG vs STCG) estimation
+[ ] ISO AMT trap calculator
+[ ] 83(b) election tracking for restricted shares
+[ ] Tax lot optimization (FIFO / LIFO / specific lot)
+[ ] Year-end tax summary export (PDF/CSV)
+[ ] Multi-country tax support (US + IL withholding reconciliation)
+
+PLANNED — DASHBOARD & VIEWS
+----------------------------
+[ ] What-If / Scenario calculator — see src/components/views/WhatIfView.tsx ✓ ADDED
+[ ] Israeli tax display on sell scenarios — see WhatIfView.tsx ✓ ADDED
+[ ] Vesting calendar — month-by-month grid view
+[ ] Net worth tracker integrating equity + other assets
+[ ] Strike price break-even analysis for ISO/NSO options
+[ ] Performance vs S&P500 / NASDAQ benchmark chart
+[ ] Mobile-responsive layout
+
+PLANNED — INFRASTRUCTURE
+-------------------------
+[ ] Persistent server state across restarts (SQLite for tokens/settings)
+[ ] Auto-restart extraction server on crash
+[ ] Scheduled price refresh (every market hour during trading hours)
+[ ] Export full portfolio as PDF report
+[ ] Export to CSV / Excel for tax advisor
+[ ] Backup / restore portfolio data (JSON export/import)
+[ ] Dark/light theme toggle
+
+KNOWN ISSUES
+------------
+[ ] Meezeh token not persisted — server must be restarted to re-authenticate after restart
+[ ] E*TRADE OAuth tokens lost on server restart (in-memory only)
+[ ] PDF.js worker loaded from unpkg CDN — needs local worker for offline use
+[ ] Share counts in European decimal format (454.000) may be misread as 454,000
+      Workaround: AI prompt handles most cases; validate in Review screen

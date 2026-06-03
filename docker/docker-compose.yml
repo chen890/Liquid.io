@@ -1,0 +1,34 @@
+services:
+
+  # ── Python extraction server (FastAPI + uvicorn) ────────────────────────────
+  api:
+    build:
+      context: ../server          # build context = server/
+      dockerfile: Dockerfile      # server/Dockerfile
+    image: equitylens-api:latest
+    container_name: equitylens-api
+    restart: unless-stopped
+    env_file:
+      - ../.env                   # MEEZEH_USERNAME, MEEZEH_PASSWORD, SOFIA_*, OPENAI_API_KEY
+    ports:
+      - "3712:3712"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3712/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── React frontend (Vite build → nginx) ────────────────────────────────────
+  frontend:
+    build:
+      context: ..                 # build context = project root
+      dockerfile: docker/Dockerfile
+    image: equitylens-frontend:latest
+    container_name: equitylens-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy

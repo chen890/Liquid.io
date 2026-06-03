@@ -1,0 +1,22 @@
+# Never include in any Docker image
+.env
+.env.*
+*.local
+
+# Build outputs
+dist/
+node_modules/
+server/.venv/
+server/__pycache__/
+**/__pycache__/
+**/*.pyc
+
+# Dev tooling
+.cursor/
+.vscode/
+*.log
+to-do.txt
+
+# Git
+.git/
+.gitignore
