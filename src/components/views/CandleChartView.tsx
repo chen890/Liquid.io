@@ -209,7 +209,6 @@ export function CandleChartView() {
     if (containerRef.current) ro.observe(containerRef.current);
 
     return () => { ro.disconnect(); chart.remove(); chartRef.current = null; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
   const reg  = data?.meta.regularMarketPrice ?? null;

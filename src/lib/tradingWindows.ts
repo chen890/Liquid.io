@@ -79,7 +79,7 @@ export function computeSection102Tax(params: {
   const appreciation  = Math.max(0, grossUSD - vestValue);
 
   let incomeTaxUSD = 0;
-  let cgtUSD       = 0;
+  let cgtUSD: number;
 
   if (route === '102b2') {
     // ALL proceeds taxed at CGT rate — no income tax at vest

@@ -39,7 +39,7 @@ export default function App() {
 
   useEffect(() => {
     loadPortfolio();
-  }, []);
+  }, [loadPortfolio]);
 
   if (isLoading) {
     return (
