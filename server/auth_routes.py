@@ -5,22 +5,15 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
-import jwt
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import bcrypt
 from pydantic import BaseModel, Field
 
-from auth_config import (
-    ACCESS_TOKEN_EXPIRE_MINUTES,
-    JWT_ALGORITHM,
-    SESSION_COOKIE_NAME,
-    get_fernet,
-    get_jwt_secret,
-)
+from auth_config import SESSION_COOKIE_NAME, get_fernet
+from auth_tokens import cookie_params, decode_access_token, issue_access_token, set_session_cookie
 import user_db as db
 
 log = logging.getLogger("equitylens.auth")
@@ -54,39 +47,6 @@ def _verify_password(raw: str, hashed: str) -> bool:
         return False
 
 
-def _issue_token(user_id: int, email: str) -> str:
-    now = datetime.now(timezone.utc)
-    exp = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {
-        "sub": str(user_id),
-        "email": email,
-        "iat": int(now.timestamp()),
-        "exp": int(exp.timestamp()),
-    }
-    return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
-
-
-def _decode_token(token: str) -> dict[str, Any]:
-    try:
-        return jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
-    except jwt.ExpiredSignatureError as exc:
-        raise HTTPException(401, "Session expired — please sign in again") from exc
-    except jwt.InvalidTokenError as exc:
-        raise HTTPException(401, "Invalid session") from exc
-
-
-def _cookie_params(request: Request) -> dict[str, Any]:
-    forwarded = (request.headers.get("x-forwarded-proto") or "").lower()
-    secure = request.url.scheme == "https" or forwarded == "https"
-    return {
-        "httponly": True,
-        "secure": secure,
-        "samesite": "lax",
-        "path": "/",
-        "max_age": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-    }
-
-
 def get_current_user_id(
     request: Request,
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
@@ -96,7 +56,7 @@ def get_current_user_id(
         token = creds.credentials
     if not token:
         raise HTTPException(401, "Not authenticated")
-    data = _decode_token(token)
+    data = decode_access_token(token)
     try:
         return int(data["sub"])
     except (KeyError, ValueError) as exc:
@@ -116,10 +76,6 @@ class LoginBody(BaseModel):
     password: str
 
 
-def _set_session_cookie(response: Response, request: Request, token: str) -> None:
-    response.set_cookie(SESSION_COOKIE_NAME, token, **_cookie_params(request))
-
-
 @router.post("/register", status_code=201)
 def auth_register(body: RegisterBody, response: Response, request: Request) -> dict[str, Any]:
     _init_db()
@@ -136,8 +92,8 @@ def auth_register(body: RegisterBody, response: Response, request: Request) -> d
             raise HTTPException(409, "An account with this email already exists") from exc
         log.exception("register failed")
         raise HTTPException(500, "Registration failed") from exc
-    token = _issue_token(uid, email)
-    _set_session_cookie(response, request, token)
+    token = issue_access_token(uid, email)
+    set_session_cookie(response, request, token)
     return {"ok": True, "user": {"id": uid, "email": email}}
 
 
@@ -148,8 +104,8 @@ def auth_login(body: LoginBody, response: Response, request: Request) -> dict[st
     row = db.get_user_by_email(email)
     if not row or not _verify_password(body.password, row["password_hash"]):
         raise HTTPException(401, "Invalid email or password")
-    token = _issue_token(row["id"], row["email"])
-    _set_session_cookie(response, request, token)
+    token = issue_access_token(row["id"], row["email"])
+    set_session_cookie(response, request, token)
     return {"ok": True, "user": {"id": row["id"], "email": row["email"]}}
 
 
@@ -159,7 +115,7 @@ def auth_logout(response: Response, request: Request) -> dict[str, bool]:
         SESSION_COOKIE_NAME,
         path="/",
         httponly=True,
-        secure=_cookie_params(request)["secure"],
+        secure=cookie_params(request)["secure"],
         samesite="lax",
     )
     return {"ok": True}
@@ -173,7 +129,7 @@ def auth_me(request: Request, creds: Annotated[HTTPAuthorizationCredentials | No
         token = creds.credentials
     if not token:
         raise HTTPException(401, "Not authenticated")
-    data = _decode_token(token)
+    data = decode_access_token(token)
     uid = int(data["sub"])
     user = db.get_user_by_id(uid)
     if not user:
@@ -290,4 +246,7 @@ def register(app: Any) -> None:
     _init_db()
     app.include_router(router)
     app.include_router(vault)
+    from oauth_routes import oauth_router
+
+    app.include_router(oauth_router)
     log.info("User auth and vault routes mounted")

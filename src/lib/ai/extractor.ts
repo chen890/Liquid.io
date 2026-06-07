@@ -1,9 +1,9 @@
-import type { GrantRecord, ExtractedField, GrantType, VestingFrequency } from '../../types';
+import type { GrantRecord, ExtractedField, GrantType, VestingFrequency, ExtractionProvider } from '../../types';
 import { v4 as uuidv4 } from 'uuid';
 import { getSetting } from '../storage';
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Raw types returned by the AI (both OpenAI and Sofia use the same schema)
+// Raw types returned by the AI (OpenAI + Anthropic use the same schema)
 // ──────────────────────────────────────────────────────────────────────────────
 interface RawField<T> { value: T | null; confidence: number }
 interface RawSnippet { field: string; snippet: string }
@@ -34,7 +34,7 @@ interface RawGrantData {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// System prompt (identical for both backends)
+// System prompt (identical for both providers)
 // ──────────────────────────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `You are an expert equity compensation analyst. Extract ALL stock grants, RSUs, stock options, and equity awards from the document provided.
 
@@ -173,61 +173,82 @@ function stripFences(s: string): string {
 // ──────────────────────────────────────────────────────────────────────────────
 export interface ServerHealth {
   online: boolean;
-  backend: 'sofia' | 'openai' | 'none';
-  meezehConfigured: boolean;
+  openaiEnvConfigured: boolean;
+  anthropicEnvConfigured: boolean;
+  openaiModel?: string;
+  anthropicModel?: string;
 }
 
 export async function checkServerHealth(): Promise<ServerHealth> {
   try {
     const r = await fetch('/api/health', { signal: AbortSignal.timeout(2000) });
-    if (!r.ok) return { online: false, backend: 'none', meezehConfigured: false };
-    const d = await r.json() as { backend?: string; meezehConfigured?: boolean };
+    if (!r.ok) {
+      return {
+        online: false,
+        openaiEnvConfigured: false,
+        anthropicEnvConfigured: false,
+      };
+    }
+    const d = await r.json() as {
+      openaiEnvConfigured?: boolean;
+      anthropicEnvConfigured?: boolean;
+      openaiModel?: string;
+      anthropicModel?: string;
+    };
     return {
       online: true,
-      backend: (d.backend as 'sofia' | 'openai') ?? 'openai',
-      meezehConfigured: d.meezehConfigured ?? false,
+      openaiEnvConfigured: d.openaiEnvConfigured ?? false,
+      anthropicEnvConfigured: d.anthropicEnvConfigured ?? false,
+      openaiModel: d.openaiModel,
+      anthropicModel: d.anthropicModel,
     };
   } catch {
-    return { online: false, backend: 'none', meezehConfigured: false };
+    return {
+      online: false,
+      openaiEnvConfigured: false,
+      anthropicEnvConfigured: false,
+    };
   }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Main export
-//
-// Strategy:
-//   1. Try the local server (POST /api/extract) — it handles Sofia via Meezeh
-//      and falls back to OpenAI using the browser key.
-//   2. If the server is not running, fall back to calling OpenAI directly from
-//      the browser using the stored extractionKey.
-// ──────────────────────────────────────────────────────────────────────────────
+const OPENAI_MODEL = 'gpt-4o';
+
 export async function extractGrantsFromText(
   text: string,
   filename: string,
   apiKey: string,
   onProgress?: (msg: string) => void,
+  providerArg?: ExtractionProvider,
 ): Promise<GrantRecord[]> {
   const chunks = chunkText(text, 12_000);
   const allGrants: GrantRecord[] = [];
 
-  // Check if local server is running
+  const provider: ExtractionProvider =
+    providerArg ?? (await getSetting<ExtractionProvider>('extractionProvider')) ?? 'openai';
+  const human = provider === 'openai' ? 'ChatGPT (OpenAI)' : 'Claude (Anthropic)';
+
   const health = await checkServerHealth();
 
   if (health.online) {
-    // ── Path A: server handles everything (Sofia or OpenAI) ──────────────────
     for (let i = 0; i < chunks.length; i++) {
       const label = chunks.length > 1 ? `${filename} (part ${i + 1}/${chunks.length})` : filename;
-      onProgress?.(`Analyzing ${label} via ${health.backend === 'sofia' ? 'Sofia' : 'OpenAI'}...`);
+      onProgress?.(`Analyzing ${label} via ${human}…`);
 
       const res = await fetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: label, text: chunks[i], apiKey }),
+        body: JSON.stringify({ filename: label, text: chunks[i], apiKey, provider }),
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { error?: string };
-        throw new Error(err.error ?? `Server error ${res.status}`);
+        let msg = `Server error ${res.status}`;
+        try {
+          const j = await res.json() as { detail?: string | unknown };
+          if (typeof j.detail === 'string') msg = j.detail;
+        } catch {
+          /* */
+        }
+        throw new Error(msg);
       }
 
       const data = await res.json() as { grants: RawGrantData[] };
@@ -238,17 +259,22 @@ export async function extractGrantsFromText(
     return allGrants;
   }
 
-  // ── Path B: server not running — call OpenAI directly from browser ─────────
   const key = apiKey || (await getSetting<string>('extractionKey')) || '';
   if (!key) {
     throw new Error(
-      'No API key available. Enter your OpenAI key in Settings, or start the extraction server with: npm start',
+      'No API key in Settings. Add your key for the selected provider, or run npm start so the extraction server can use .env keys.',
+    );
+  }
+
+  if (provider === 'anthropic') {
+    throw new Error(
+      'Claude extraction needs the local API server (Anthropic blocks browser calls). Run: npm start',
     );
   }
 
   for (let i = 0; i < chunks.length; i++) {
     const label = chunks.length > 1 ? `${filename} (part ${i + 1}/${chunks.length})` : filename;
-    onProgress?.(`Analyzing ${label} via OpenAI (direct)...`);
+    onProgress?.(`Analyzing ${label} via OpenAI (direct)…`);
 
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -257,7 +283,7 @@ export async function extractGrantsFromText(
         Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
+        model: OPENAI_MODEL,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: `File: ${label}\n\n${chunks[i]}` },

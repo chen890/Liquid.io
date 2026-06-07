@@ -1,14 +1,13 @@
 [project]
 name = "equitylens-server"
 version = "0.1.0"
-description = "EquityLens extraction server — Meezeh auth + Sofia API proxy"
+description = "EquityLens extraction server — grant extraction + market data APIs"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.104",
     "uvicorn>=0.24",
     "httpx>=0.25",
     "python-dotenv>=1.0",
-    "me-auth-client>=0.39.0",
     "openai>=1.75",
     "requests-oauthlib>=2.0.0",
     "cryptography>=42.0.0",

@@ -3,19 +3,15 @@ EquityLens extraction server (Python / FastAPI)
 
 Endpoints
 ---------
-GET  /api/health   — liveness + backend status
+GET  /api/health   — liveness + extraction env hints
 POST /api/extract  — extract equity grants from document text
 
-Auth flow
----------
-1. Read MEEZEH_USERNAME / MEEZEH_PASSWORD from .env
-2. Call me_auth_client.meezeh_app.get_token_by_username_password() → bearer token
-3. Cache token for 50 minutes, refresh on expiry
-4. Call Sofia's OpenAI-compatible chat/completions endpoint with the token
-5. Parse JSON response → return grants list
+Extraction uses the **user-selected** provider (`openai` or `anthropic`):
+  - OpenAI Chat Completions (ChatGPT-class models, e.g. gpt-4o)
+  - Anthropic Messages API (Claude)
 
-Fallback: if Meezeh is not configured, use the OPENAI_API_KEY / browser-supplied key
-to call api.openai.com directly.
+Keys are sent from the app (Settings) and/or optional `OPENAI_API_KEY` /
+`ANTHROPIC_API_KEY` in the server `.env`.
 """
 
 from __future__ import annotations
@@ -26,7 +22,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import uvicorn
@@ -46,52 +42,14 @@ ROOT = Path(__file__).parent.parent
 load_dotenv(ROOT / ".env", override=True)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-PORT            = int(os.getenv("EXTRACTION_SERVER_PORT", "3712"))
-SOFIA_BASE      = os.getenv("SOFIA_BASE_URL", "https://sofia-api.lgw.cloud.mobileye.com/v1/api").rstrip("/")
-SOFIA_MODEL     = os.getenv("SOFIA_MODEL_ID",  "us.anthropic.claude-opus-4-5-20251101-v1:0")
-MEEZEH_USER     = os.getenv("MEEZEH_USERNAME", "")
-MEEZEH_PASS     = os.getenv("MEEZEH_PASSWORD", "")
-OPENAI_KEY      = os.getenv("OPENAI_API_KEY",  "")
-SOFIA_API_KEY   = os.getenv("SOFIA_API_KEY",   "")   # pre-obtained token, skips Meezeh auth
+PORT = int(os.getenv("EXTRACTION_SERVER_PORT", "3712"))
+OPENAI_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+OPENAI_CHAT_MODEL = os.getenv("OPENAI_EXTRACTION_MODEL", "gpt-4o").strip()
+ANTHROPIC_CHAT_MODEL = os.getenv("ANTHROPIC_EXTRACTION_MODEL", "claude-sonnet-4-20250514").strip()
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 log = logging.getLogger("equitylens")
-
-# ── Meezeh token cache ────────────────────────────────────────────────────────
-_token: str = ""
-_token_expiry: float = 0.0          # epoch seconds
-TOKEN_TTL = 50 * 60                 # 50 minutes
-
-
-def get_sofia_token() -> str:
-    """Return a valid Sofia bearer token, trying sources in priority order:
-       1. SOFIA_API_KEY  — pre-obtained token pasted directly into .env
-       2. Meezeh username/password  — auto-refreshed via me_auth_client
-    """
-    global _token, _token_expiry
-
-    # 1. Static pre-obtained token
-    if SOFIA_API_KEY:
-        return SOFIA_API_KEY
-
-    # 2. Cached Meezeh token
-    if _token and time.time() < _token_expiry:
-        return _token
-
-    if not MEEZEH_USER or not MEEZEH_PASS:
-        return ""
-
-    try:
-        from me_auth_client import meezeh_app          # type: ignore[import]
-        token: str = meezeh_app.get_token_by_username_password(MEEZEH_USER, MEEZEH_PASS)
-        if token:
-            _token = token
-            _token_expiry = time.time() + TOKEN_TTL
-            log.info("Meezeh token refreshed  (%s...)", token[:16])
-        return _token
-    except Exception as exc:
-        log.error("Meezeh token fetch failed: %s", exc)
-        return ""
 
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -157,28 +115,13 @@ def _strip_fences(text: str) -> str:
              .rstrip("```").strip()
 
 
-async def _call_sofia(messages: list[dict], token: str) -> str:
-    async with httpx.AsyncClient(timeout=120) as client:
-        r = await client.post(
-            f"{SOFIA_BASE}/chat/completions",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={"model": SOFIA_MODEL, "messages": messages},
-        )
-        r.raise_for_status()
-        data = r.json()
-    content = data["choices"][0]["message"]["content"]
-    if isinstance(content, list):                       # Claude content blocks
-        content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
-    return content
-
-
-async def _call_openai(messages: list[dict], api_key: str) -> str:
+async def _call_openai(messages: list[dict], api_key: str, model: str) -> str:
     async with httpx.AsyncClient(timeout=120) as client:
         r = await client.post(
             "https://api.openai.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={
-                "model": "gpt-4o",
+                "model": model,
                 "messages": messages,
                 "response_format": {"type": "json_object"},
                 "temperature": 0,
@@ -187,6 +130,34 @@ async def _call_openai(messages: list[dict], api_key: str) -> str:
         r.raise_for_status()
         data = r.json()
     return data["choices"][0]["message"]["content"]
+
+
+async def _call_anthropic(messages: list[dict], api_key: str, model: str) -> str:
+    system = next((m["content"] for m in messages if m["role"] == "system"), "")
+    user_text = "\n\n".join(m["content"] for m in messages if m["role"] == "user")
+    async with httpx.AsyncClient(timeout=180) as client:
+        r = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "max_tokens": 16384,
+                "system": system,
+                "messages": [{"role": "user", "content": user_text}],
+            },
+        )
+        r.raise_for_status()
+        data = r.json()
+    parts = data.get("content") or []
+    out: list[str] = []
+    for block in parts:
+        if isinstance(block, dict) and block.get("type") == "text":
+            out.append(str(block.get("text", "")))
+    return "".join(out)
 
 
 def _chunk(text: str, max_chars: int = 12_000) -> list[str]:
@@ -235,6 +206,7 @@ class ExtractRequest(BaseModel):
     filename: str
     text: str
     apiKey: str = ""
+    provider: Literal["openai", "anthropic"] = "openai"
 
 
 @app.get("/api/price/{ticker}")
@@ -553,19 +525,13 @@ async def check_url(url: str) -> dict[str, Any]:
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
-    # Use ONLY the cached token — never trigger a network call from a health check.
-    cached_token = (_token if (_token and time.time() < _token_expiry) else SOFIA_API_KEY) or ""
-    sofia_ok  = bool(cached_token)
-    auth_method = "api_key" if SOFIA_API_KEY else ("meezeh" if (MEEZEH_USER and MEEZEH_PASS) else "none")
     return {
         "ok": True,
         "pid": os.getpid(),
-        "backend": "sofia" if sofia_ok else "openai",
-        "meezehConfigured": bool(MEEZEH_USER and MEEZEH_PASS),
-        "sofiaKeyConfigured": bool(SOFIA_API_KEY),
-        "tokenCached": sofia_ok,
-        "authMethod": auth_method,
-        "model": SOFIA_MODEL if sofia_ok else "gpt-4o",
+        "openaiEnvConfigured": bool(OPENAI_KEY),
+        "anthropicEnvConfigured": bool(ANTHROPIC_KEY),
+        "openaiModel": OPENAI_CHAT_MODEL,
+        "anthropicModel": ANTHROPIC_CHAT_MODEL,
     }
 
 
@@ -574,44 +540,53 @@ async def extract(req: ExtractRequest) -> dict[str, Any]:
     if not req.filename or not req.text:
         raise HTTPException(400, "filename and text are required")
 
-    token       = get_sofia_token()
-    use_sofia   = bool(token)
-    openai_key  = req.apiKey.strip() or OPENAI_KEY
+    if req.provider == "openai":
+        api_key = req.apiKey.strip() or OPENAI_KEY
+        model = OPENAI_CHAT_MODEL
+        label = "openai"
+        if not api_key:
+            raise HTTPException(
+                503,
+                "No OpenAI API key. Add your key in Settings (ChatGPT) or set OPENAI_API_KEY on the server.",
+            )
 
-    if not use_sofia and not openai_key:
-        raise HTTPException(503, (
-            "No extraction backend available. "
-            "Set MEEZEH_USERNAME/PASSWORD in .env for Sofia, "
-            "or enter an OpenAI key in Settings."
-        ))
+        async def call_llm(msgs: list[dict]) -> str:
+            return await _call_openai(msgs, api_key, model)
+    else:
+        api_key = req.apiKey.strip() or ANTHROPIC_KEY
+        model = ANTHROPIC_CHAT_MODEL
+        label = "anthropic"
+        if not api_key:
+            raise HTTPException(
+                503,
+                "No Anthropic API key. Add your key in Settings (Claude) or set ANTHROPIC_API_KEY on the server.",
+            )
 
-    backend = "sofia" if use_sofia else "openai"
-    log.info("extract  %s  (%d chars, %s)", req.filename, len(req.text), backend)
+        async def call_llm(msgs: list[dict]) -> str:
+            return await _call_anthropic(msgs, api_key, model)
+
+    log.info("extract  %s  (%d chars, %s / %s)", req.filename, len(req.text), label, model)
 
     chunks = _chunk(req.text)
     all_grants: list[Any] = []
 
     for i, chunk in enumerate(chunks):
-        label = f"{req.filename} [{i+1}/{len(chunks)}]" if len(chunks) > 1 else req.filename
+        label_chunk = f"{req.filename} [{i+1}/{len(chunks)}]" if len(chunks) > 1 else req.filename
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": f"File: {label}\n\n{chunk}"},
+            {"role": "user",   "content": f"File: {label_chunk}\n\n{chunk}"},
         ]
 
         try:
-            raw = await _call_sofia(messages, token) if use_sofia else await _call_openai(messages, openai_key)
+            raw = await call_llm(messages)
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
             body = exc.response.text[:400]
             log.error("LLM API error %d: %s", status, body)
-            # Sofia 401 → token expired; force refresh on next call
-            if status == 401 and use_sofia:
-                global _token, _token_expiry
-                _token, _token_expiry = "", 0.0
             if status == 429:
-                raise HTTPException(429, f"{'Sofia' if use_sofia else 'OpenAI'} rate limit / quota exceeded. {body}")
+                raise HTTPException(429, f"{label} rate limit / quota exceeded. {body}")
             if status == 401:
-                raise HTTPException(401, f"{'Sofia' if use_sofia else 'OpenAI'} authentication failed. {body}")
+                raise HTTPException(401, f"{label} authentication failed. {body}")
             raise HTTPException(status, f"LLM API error {status}: {body}")
 
         try:
@@ -625,16 +600,15 @@ async def extract(req: ExtractRequest) -> dict[str, Any]:
         all_grants.extend(grants)
 
     log.info("total  %s → %d grant(s)", req.filename, len(all_grants))
-    return {"grants": all_grants, "backend": backend}
+    return {"grants": all_grants, "backend": label, "model": model}
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    meezeh_ok = bool(MEEZEH_USER and MEEZEH_PASS)
     log.info("\nEquityLens extraction server  http://localhost:%d", PORT)
-    log.info("  Backend  : %s", f"Sofia ({SOFIA_BASE}) via Meezeh" if meezeh_ok else "OpenAI (browser key)")
-    if meezeh_ok:
-        log.info("  Meezeh   : %s", MEEZEH_USER)
-        log.info("  Model    : %s", SOFIA_MODEL)
+    log.info("  OpenAI env key     : %s", "yes" if OPENAI_KEY else "no")
+    log.info("  Anthropic env key  : %s", "yes" if ANTHROPIC_KEY else "no")
+    log.info("  OpenAI model       : %s", OPENAI_CHAT_MODEL)
+    log.info("  Anthropic model    : %s", ANTHROPIC_CHAT_MODEL)
     log.info("")
     uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=False, app_dir=str(Path(__file__).parent))

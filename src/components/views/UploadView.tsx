@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Upload, X, CheckCircle, Loader2, ChevronRight, AlertTriangle, Server } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
-import type { DocumentRecord } from '../../types';
+import type { DocumentRecord, ExtractionProvider } from '../../types';
 import { usePortfolioStore } from '../../store/portfolioStore';
 import { parseFile } from '../../lib/parsers';
 import { extractGrantsFromText, checkServerHealth } from '../../lib/ai/extractor';
@@ -38,12 +38,14 @@ export function UploadView() {
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [apiKey, setApiKey] = useState('');
+  const [extractionProvider, setExtractionProvider] = useState<ExtractionProvider>('openai');
   const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
   const [serverHealth, setServerHealth] = useState<ServerHealth | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     getSetting<string>('extractionKey').then((k) => setApiKey(k ?? ''));
+    getSetting<ExtractionProvider>('extractionProvider').then((p) => setExtractionProvider(p ?? 'openai'));
     checkServerHealth().then(setServerHealth);
   }, []);
 
@@ -81,8 +83,15 @@ export function UploadView() {
     if (files.length === 0) return;
 
     const key = (await getSetting<string>('extractionKey')) ?? '';
+    const provider = (await getSetting<ExtractionProvider>('extractionProvider')) ?? 'openai';
     setApiKey(key);
-    if (!key) return; // banner below guides the user to Settings
+    setExtractionProvider(provider);
+
+    const envFallback =
+      provider === 'openai'
+        ? serverHealth?.online && serverHealth.openaiEnvConfigured
+        : serverHealth?.online && serverHealth.anthropicEnvConfigured;
+    if (!key.trim() && !envFallback) return;
 
     setProcessing(true);
     clearProcessingLog();
@@ -129,6 +138,7 @@ export function UploadView() {
             file.name,
             key,
             (msg) => addProcessingLog(`  ${msg}`),
+            provider,
           );
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -176,38 +186,66 @@ export function UploadView() {
   };
 
   const ext = (f: File) => f.name.split('.').pop()?.toLowerCase() ?? '';
-  const hasKey = apiKey.length > 0 || (serverHealth?.meezehConfigured ?? false);
+  const openaiReady =
+    apiKey.trim().length > 0 || !!(serverHealth?.online && serverHealth.openaiEnvConfigured);
+  const anthropicReady =
+    apiKey.trim().length > 0 || !!(serverHealth?.online && serverHealth.anthropicEnvConfigured);
+  const hasCredentials = extractionProvider === 'openai' ? openaiReady : anthropicReady;
+  const anthropicNeedsServer = extractionProvider === 'anthropic' && !serverHealth?.online;
+  const canProcess = hasCredentials && !anthropicNeedsServer;
 
   return (
     <div className="flex-1 overflow-auto p-6 space-y-6 max-w-3xl mx-auto w-full">
       <div>
         <h1 className="text-xl font-semibold text-white">Upload Documents</h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          Upload equity documents — GPT-4o extracts every grant automatically.
+          Upload equity documents — ChatGPT or Claude extracts every grant (see Settings for provider and API key).
         </p>
       </div>
 
       {/* Backend status */}
-      {serverHealth?.online && (
-        <div className="flex items-center gap-2 text-xs">
-          <Server className="w-3.5 h-3.5 text-emerald-500" />
-          <span className="text-emerald-500">Server online</span>
-          <span className={`px-2 py-0.5 rounded border text-xs font-medium ${
-            serverHealth.backend === 'sofia'
-              ? 'bg-indigo-950/40 border-indigo-800 text-indigo-400'
-              : 'bg-slate-800 border-slate-700 text-slate-400'
-          }`}>
-            {serverHealth.backend === 'sofia' ? 'Sofia / Claude (Meezeh)' : 'OpenAI GPT-4o'}
-          </span>
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        {serverHealth?.online ? (
+          <>
+            <Server className="w-3.5 h-3.5 text-emerald-500" />
+            <span className="text-emerald-500">Extraction server online</span>
+            {serverHealth.openaiEnvConfigured && (
+              <span className="px-2 py-0.5 rounded border border-slate-700 bg-slate-800/80 text-slate-400">
+                OPENAI_API_KEY on server
+              </span>
+            )}
+            {serverHealth.anthropicEnvConfigured && (
+              <span className="px-2 py-0.5 rounded border border-slate-700 bg-slate-800/80 text-slate-400">
+                ANTHROPIC_API_KEY on server
+              </span>
+            )}
+          </>
+        ) : (
+          <>
+            <Server className="w-3.5 h-3.5 text-slate-500" />
+            <span className="text-slate-500">Extraction server offline — OpenAI-only direct mode if you have a browser key</span>
+          </>
+        )}
+        <span className="px-2 py-0.5 rounded border text-xs font-medium border-indigo-800 bg-indigo-950/40 text-indigo-300">
+          Using: {extractionProvider === 'openai' ? 'ChatGPT (OpenAI)' : 'Claude (Anthropic)'}
+        </span>
+      </div>
+
+      {anthropicNeedsServer && (
+        <div className="flex items-start gap-3 bg-amber-950/40 border border-amber-800/60 rounded-xl px-4 py-3">
+          <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-amber-200">
+            Claude extraction needs the local API server. Run <code className="font-mono text-xs">npm start</code> in this repo, or switch to ChatGPT in Settings for browser-only OpenAI calls.
+          </div>
         </div>
       )}
 
-      {/* Missing key banner */}
-      {!hasKey && !serverHealth?.meezehConfigured && (
+      {/* Missing key / env banner */}
+      {!hasCredentials && (
         <div className="flex items-start gap-3 bg-amber-950/40 border border-amber-800/60 rounded-xl px-4 py-3">
           <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
           <div className="text-sm">
-            <span className="text-amber-300 font-medium">No API key set.</span>
+            <span className="text-amber-300 font-medium">No credentials for the selected provider.</span>
             <span className="text-amber-500 ml-2">
               Go to{' '}
               <button
@@ -216,7 +254,17 @@ export function UploadView() {
               >
                 Settings
               </button>
-              {' '}and enter your OpenAI key (<code className="font-mono text-xs">sk-...</code>).
+              {extractionProvider === 'openai' ? (
+                <>
+                  {' '}and add an OpenAI key (<code className="font-mono text-xs">sk-…</code>), or start the server with{' '}
+                  <code className="font-mono text-xs">OPENAI_API_KEY</code> in <code className="font-mono text-xs">.env</code>.
+                </>
+              ) : (
+                <>
+                  {' '}and add an Anthropic key (<code className="font-mono text-xs">sk-ant-…</code>), or start the server with{' '}
+                  <code className="font-mono text-xs">ANTHROPIC_API_KEY</code> in <code className="font-mono text-xs">.env</code>.
+                </>
+              )}
             </span>
           </div>
         </div>
@@ -299,7 +347,7 @@ export function UploadView() {
           className="w-full"
           loading={isProcessing}
           onClick={handleProcess}
-          disabled={isProcessing || !hasKey}
+          disabled={isProcessing || !canProcess}
         >
           {isProcessing ? (
             'Extracting grants...'

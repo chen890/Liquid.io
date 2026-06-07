@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 import sqlite3
+import bcrypt
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -73,8 +75,64 @@ def init_schema() -> None:
                 updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
             );
             CREATE INDEX IF NOT EXISTS idx_files_user ON user_files(user_id);
+
+            CREATE TABLE IF NOT EXISTS oauth_accounts (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                provider       TEXT NOT NULL,
+                provider_sub   TEXT NOT NULL,
+                created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(provider, provider_sub)
+            );
+            CREATE INDEX IF NOT EXISTS idx_oauth_user ON oauth_accounts(user_id);
             """
         )
+
+
+def find_user_by_oauth(provider: str, sub: str) -> dict[str, Any] | None:
+    with get_conn() as c:
+        row = c.execute(
+            """
+            SELECT u.id, u.email, u.created_at FROM users u
+            INNER JOIN oauth_accounts o ON o.user_id = u.id
+            WHERE o.provider = ? AND o.provider_sub = ?
+            """,
+            (provider, sub),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def create_oauth_user(email: str, provider: str, sub: str) -> int:
+    email = email.strip().lower()
+    if not email or "@" not in email:
+        raise ValueError("Invalid email")
+    ph = bcrypt.hashpw(secrets.token_urlsafe(48).encode("utf-8"), bcrypt.gensalt()).decode("ascii")
+    with get_conn() as c:
+        cur = c.execute(
+            "INSERT INTO users (email, password_hash) VALUES (?, ?)",
+            (email, ph),
+        )
+        uid = int(cur.lastrowid)
+        c.execute(
+            "INSERT INTO oauth_accounts (user_id, provider, provider_sub) VALUES (?, ?, ?)",
+            (uid, provider, sub),
+        )
+        return uid
+
+
+def ensure_oauth_login(email: str, provider: str, sub: str) -> int:
+    """
+    Return user id for this OAuth identity.
+    Raises ValueError with code EMAIL_PASSWORD_CONFLICT if email exists without this OAuth link.
+    """
+    email = email.strip().lower()
+    row = find_user_by_oauth(provider, sub)
+    if row:
+        return int(row["id"])
+    existing = get_user_by_email(email)
+    if existing:
+        raise ValueError("EMAIL_PASSWORD_CONFLICT")
+    return create_oauth_user(email, provider, sub)
 
 
 _NAME_RE = re.compile(r"^[a-zA-Z0-9._-]{1,128}$")
@@ -121,12 +179,6 @@ def get_user_by_id(uid: int) -> dict[str, Any] | None:
             "SELECT id, email, created_at FROM users WHERE id = ?",
             (uid,),
         ).fetchone()
-        return dict(row) if row else None
-
-
-def get_user_with_hash(uid: int) -> dict[str, Any] | None:
-    with get_conn() as c:
-        row = c.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
         return dict(row) if row else None
 
 

@@ -1,3 +1,5 @@
+export type ExtractionProvider = 'openai' | 'anthropic';
+
 export type GrantType = 'RSU' | 'ISO' | 'NSO' | 'ESPP' | 'RestrictedShares' | 'PerformanceShares';
 export type VestingFrequency = 'Monthly' | 'Quarterly' | 'Annual' | 'Custom';
 export type VestingStatus = 'active' | 'fully_vested' | 'cancelled' | 'expired';

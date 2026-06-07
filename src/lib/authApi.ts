@@ -78,6 +78,27 @@ export async function probeSession(): Promise<SessionProbe> {
   }
 }
 
+export interface OauthProviderFlags {
+  google: boolean;
+  github: boolean;
+  apple: boolean;
+}
+
+export async function fetchOauthProviders(): Promise<OauthProviderFlags> {
+  try {
+    const r = await fetch('/api/auth/oauth/providers', { credentials: 'include' });
+    if (!r.ok) return { google: false, github: false, apple: false };
+    return (await r.json()) as OauthProviderFlags;
+  } catch {
+    return { google: false, github: false, apple: false };
+  }
+}
+
+/** Full browser navigation so the OAuth provider sees a top-level GET (required by some IdPs). */
+export function navigateToOAuthStart(provider: 'google' | 'github'): void {
+  window.location.assign(`/api/auth/oauth/${provider}/start`);
+}
+
 export async function authMe(): Promise<{ ok: boolean; user: AuthUser }> {
   const r = await fetch('/api/auth/me', { credentials: 'include' });
   if (r.status === 401) {

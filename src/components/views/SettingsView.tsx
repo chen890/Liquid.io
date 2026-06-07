@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Trash2, AlertTriangle, Key, Eye, EyeOff, Check, Server, Link, RefreshCw, ExternalLink, Calendar, Shield, Plus } from 'lucide-react';
-import type { GrantRecord, TaxRoute, TradingWindow } from '../../types';
+import type { GrantRecord, TaxRoute, TradingWindow, ExtractionProvider } from '../../types';
 import { usePortfolioStore } from '../../store/portfolioStore';
 import { trusteReleaseDate } from '../../lib/tradingWindows';
 import { Button } from '../ui/Button';
@@ -80,10 +80,19 @@ function ETRADECard() {
       setSyncResult({ positions: d.positions?.length ?? 0, grants: d.grants?.length ?? 0 });
       if (d.grants && d.grants.length > 0) {
         // Convert to GrantRecord format using the extractor's rawToGrantRecord
+        const [provider, extractionKey] = await Promise.all([
+          getSetting<ExtractionProvider>('extractionProvider'),
+          getSetting<string>('extractionKey'),
+        ]);
         const res = await fetch('/api/extract', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: 'E*TRADE Portfolio Sync', text: JSON.stringify(d.grants), apiKey: '' }),
+          body: JSON.stringify({
+            filename: 'E*TRADE Portfolio Sync',
+            text: JSON.stringify(d.grants),
+            apiKey: extractionKey ?? '',
+            provider: provider ?? 'openai',
+          }),
         });
         const extracted = await res.json() as { grants?: GrantRecord[] };
         if (extracted.grants?.length) {
@@ -209,21 +218,34 @@ function ETRADECard() {
 export function SettingsView() {
   const { clearAllData, portfolio } = usePortfolioStore();
   const [confirmClear, setConfirmClear] = useState(false);
+  const [extractionProvider, setExtractionProvider] = useState<ExtractionProvider>('openai');
   const [extractionKey, setExtractionKey] = useState('');
   const [keyVisible, setKeyVisible] = useState(false);
   const [saved, setSaved] = useState(false);
   const [serverHealth, setServerHealth] = useState<ServerHealth | null>(null);
 
   useEffect(() => {
+    getSetting<ExtractionProvider>('extractionProvider').then((p) => setExtractionProvider(p ?? 'openai'));
     getSetting<string>('extractionKey').then((k) => setExtractionKey(k ?? ''));
     checkServerHealth().then(setServerHealth);
   }, []);
 
   const handleSaveKey = async () => {
+    await saveSetting('extractionProvider', extractionProvider);
     await saveSetting('extractionKey', extractionKey.trim());
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
+
+  const handleProviderChange = (p: ExtractionProvider) => {
+    setExtractionProvider(p);
+    setSaved(false);
+  };
+
+  const keyTrim = extractionKey.trim();
+  const keyValidOpenAI = /^sk-[a-zA-Z0-9_-]+$/.test(keyTrim);
+  const keyValidAnthropic = /^sk-ant-[a-zA-Z0-9_-]+$/.test(keyTrim);
+  const keyValid = extractionProvider === 'openai' ? keyValidOpenAI : keyValidAnthropic;
 
   const handleClearAll = async () => {
     if (confirmClear) {
@@ -235,8 +257,6 @@ export function SettingsView() {
     }
   };
 
-  const keyValid = extractionKey.trim().startsWith('sk-');
-
   return (
     <div className="flex-1 overflow-auto p-6 space-y-6 max-w-2xl">
       <div>
@@ -244,55 +264,109 @@ export function SettingsView() {
         <p className="text-sm text-slate-500 mt-0.5">Manage your EquityLens preferences and data.</p>
       </div>
 
-      {/* OpenAI API Key */}
+      {/* AI extraction provider + API key */}
       <Card padding="md">
         <CardHeader>
-          <CardTitle>OpenAI API Key</CardTitle>
+          <CardTitle>AI grant extraction</CardTitle>
           <Key className="w-4 h-4 text-slate-600" />
         </CardHeader>
-        <div className="space-y-3">
-          <div className="flex gap-2">
-            <input
-              type={keyVisible ? 'text' : 'password'}
-              value={extractionKey}
-              onChange={(e) => { setExtractionKey(e.target.value); setSaved(false); }}
-              placeholder="sk-..."
-              className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 font-mono"
-            />
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500">
+            Choose ChatGPT (OpenAI) or Claude (Anthropic). The API key below applies to the selected provider and is stored only in this browser.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <button
-              onClick={() => setKeyVisible((v) => !v)}
-              className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-400 hover:text-white transition-colors"
-            >
-              {keyVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              type="button"
+              onClick={() => handleProviderChange('openai')}
+              className={`rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+                extractionProvider === 'openai'
+                  ? 'border-indigo-500 bg-indigo-950/40 text-white'
+                  : 'border-slate-700 bg-slate-900/50 text-slate-400 hover:border-slate-600'
+              }`}>
+              <div className="font-medium">ChatGPT</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">OpenAI · {serverHealth?.openaiModel ?? 'gpt-4o'}</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleProviderChange('anthropic')}
+              className={`rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+                extractionProvider === 'anthropic'
+                  ? 'border-indigo-500 bg-indigo-950/40 text-white'
+                  : 'border-slate-700 bg-slate-900/50 text-slate-400 hover:border-slate-600'
+              }`}>
+              <div className="font-medium">Claude</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">Anthropic · {serverHealth?.anthropicModel ?? 'claude-sonnet-4'}</div>
             </button>
           </div>
 
-          {extractionKey.trim() && !keyValid && (
+          <div>
+            <label className="text-xs text-slate-500 block mb-1.5">
+              {extractionProvider === 'openai' ? 'OpenAI API key' : 'Anthropic API key'}
+            </label>
+            <div className="flex gap-2">
+              <input
+                type={keyVisible ? 'text' : 'password'}
+                value={extractionKey}
+                onChange={(e) => { setExtractionKey(e.target.value); setSaved(false); }}
+                placeholder={extractionProvider === 'openai' ? 'sk-…' : 'sk-ant-…'}
+                className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 font-mono"
+              />
+              <button
+                type="button"
+                onClick={() => setKeyVisible((v) => !v)}
+                className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-400 hover:text-white transition-colors"
+              >
+                {keyVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          {keyTrim && !keyValid && (
             <p className="text-xs text-amber-400">
-              Key should start with <code className="font-mono">sk-</code>. Get yours at platform.openai.com/api-keys.
+              {extractionProvider === 'openai' ? (
+                <>OpenAI keys look like <code className="font-mono">sk-…</code>. Create one at platform.openai.com/api-keys.</>
+              ) : (
+                <>Anthropic keys look like <code className="font-mono">sk-ant-…</code>. Create one at console.anthropic.com/settings/keys.</>
+              )}
             </p>
           )}
 
-          <div className="flex items-center gap-3">
-            <Button variant="primary" size="sm" onClick={handleSaveKey} disabled={!extractionKey.trim()}>
-              {saved ? <><Check className="w-3.5 h-3.5" /> Saved</> : 'Save Key'}
+          <div className="flex items-center gap-3 flex-wrap">
+            <Button variant="primary" size="sm" onClick={handleSaveKey} disabled={!keyTrim || !keyValid}>
+              {saved ? <><Check className="w-3.5 h-3.5" /> Saved</> : 'Save provider & key'}
             </Button>
-            <p className="text-xs text-slate-600">
-              Stored in browser IndexedDB. Used only for direct OpenAI API calls.
-            </p>
+            {serverHealth?.online && (
+              <span className="text-xs text-emerald-500 flex items-center gap-1">
+                <Server className="w-3.5 h-3.5" />
+                Extraction server online
+                {serverHealth.openaiEnvConfigured && extractionProvider === 'openai' && (
+                  <span className="text-slate-500">· server has OPENAI_API_KEY fallback</span>
+                )}
+                {serverHealth.anthropicEnvConfigured && extractionProvider === 'anthropic' && (
+                  <span className="text-slate-500">· server has ANTHROPIC_API_KEY fallback</span>
+                )}
+              </span>
+            )}
           </div>
 
           <div className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-slate-500">
-            Get your API key at{' '}
-            <a
-              href="https://platform.openai.com/api-keys"
-              target="_blank"
-              rel="noreferrer"
-              className="text-indigo-400 hover:underline"
-            >
-              platform.openai.com/api-keys
-            </a>
-            . Grant extraction uses <span className="text-slate-400">gpt-4o</span> with structured JSON output.
+            {extractionProvider === 'openai' ? (
+              <>
+                OpenAI:{' '}
+                <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">
+                  platform.openai.com/api-keys
+                </a>
+              </>
+            ) : (
+              <>
+                Anthropic:{' '}
+                <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">
+                  console.anthropic.com/settings/keys
+                </a>
+                {' '}· Claude extraction requires the local server when running from the browser only.
+              </>
+            )}
           </div>
         </div>
       </Card>
@@ -350,37 +424,33 @@ export function SettingsView() {
           )}
           {serverHealth?.online ? (
             <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
-                <span className="text-slate-300 font-medium">
-                  Local server online
-                </span>
-                <span className={`px-2 py-0.5 rounded text-xs font-medium border ${
-                  serverHealth.backend === 'sofia'
-                    ? 'bg-indigo-950/40 border-indigo-800 text-indigo-400'
-                    : 'bg-emerald-950/40 border-emerald-800 text-emerald-400'
-                }`}>
-                  {serverHealth.backend === 'sofia' ? 'Sofia / Claude' : 'OpenAI GPT-4o'}
-                </span>
+                <span className="text-slate-300 font-medium">Local extraction server online</span>
               </div>
-              {serverHealth.meezehConfigured && (
-                <p className="text-slate-500 ml-4">
-                  Meezeh credentials loaded — using Sofia API at{' '}
-                  <span className="text-slate-400 font-mono">sofia-api.lgw.cloud.mobileye.com</span>
-                </p>
-              )}
+              <ul className="text-slate-500 ml-4 list-disc space-y-0.5">
+                <li>
+                  OpenAI: {serverHealth.openaiEnvConfigured ? 'server key configured' : 'no server key'} · model{' '}
+                  <span className="text-slate-400 font-mono">{serverHealth.openaiModel ?? '—'}</span>
+                </li>
+                <li>
+                  Anthropic: {serverHealth.anthropicEnvConfigured ? 'server key configured' : 'no server key'} · model{' '}
+                  <span className="text-slate-400 font-mono">{serverHealth.anthropicModel ?? '—'}</span>
+                </li>
+              </ul>
             </div>
           ) : (
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-slate-600 flex-shrink-0" />
-                <span className="text-slate-500">Server not running — using OpenAI direct (browser)</span>
+                <span className="text-slate-500">Server not running</span>
               </div>
               <div className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 font-mono text-slate-300">
                 npm start
               </div>
               <p className="text-slate-600">
-                Start the server to use Sofia (Meezeh auth). Without it, the OpenAI key below is used directly from the browser.
+                Start the server for Claude extraction and for using <code className="font-mono text-[11px]">.env</code> API keys.
+                Without it, ChatGPT can still run from the browser if you saved an OpenAI key in Settings.
               </p>
             </div>
           )}
@@ -402,7 +472,7 @@ export function SettingsView() {
           <p><span className="text-slate-400">EquityLens</span> — Document Intelligence & Equity Portfolio Dashboard</p>
           <p>Local-first · All data stored in browser IndexedDB</p>
           <p>Supported files: PDF, DOCX, XLSX, CSV, XML, HTML, TXT</p>
-          <p>Primary: Sofia (Mobileye internal) via Meezeh · Fallback: OpenAI GPT-4o</p>
+          <p>Grant extraction: ChatGPT (OpenAI) or Claude (Anthropic), chosen in Settings</p>
         </div>
       </Card>
     </div>
