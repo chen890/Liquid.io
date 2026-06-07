@@ -3,11 +3,13 @@ import { Upload, X, CheckCircle, Loader2, ChevronRight, AlertTriangle, Server } 
 import { v4 as uuidv4 } from 'uuid';
 import type { DocumentRecord, ExtractionProvider } from '../../types';
 import { usePortfolioStore } from '../../store/portfolioStore';
+import { useAuthStore } from '../../store/authStore';
 import { parseFile } from '../../lib/parsers';
 import { extractGrantsFromText, checkServerHealth } from '../../lib/ai/extractor';
 import type { ServerHealth } from '../../lib/ai/extractor';
 import { reconcileGrants } from '../../lib/ai/reconciler';
 import { getSetting } from '../../lib/storage';
+import { migrateLegacyExtractionKey, getExtractionKeyForProvider, EXTRACTION_KEY_OPENAI, EXTRACTION_KEY_ANTHROPIC } from '../../lib/extractionKeys';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 
@@ -34,19 +36,30 @@ export function UploadView() {
     addProcessingLog, clearProcessingLog,
     processingLog, isProcessing, setProcessing,
   } = usePortfolioStore();
+  const backendHasAuth = useAuthStore((s) => s.backendHasAuth);
 
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [apiKey, setApiKey] = useState('');
+  const [openaiKey, setOpenaiKey] = useState('');
+  const [anthropicKey, setAnthropicKey] = useState('');
   const [extractionProvider, setExtractionProvider] = useState<ExtractionProvider>('openai');
   const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
   const [serverHealth, setServerHealth] = useState<ServerHealth | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    getSetting<string>('extractionKey').then((k) => setApiKey(k ?? ''));
-    getSetting<ExtractionProvider>('extractionProvider').then((p) => setExtractionProvider(p ?? 'openai'));
-    checkServerHealth().then(setServerHealth);
+    void (async () => {
+      await migrateLegacyExtractionKey();
+      const [o, a, p] = await Promise.all([
+        getSetting<string>(EXTRACTION_KEY_OPENAI),
+        getSetting<string>(EXTRACTION_KEY_ANTHROPIC),
+        getSetting<ExtractionProvider>('extractionProvider'),
+      ]);
+      setOpenaiKey(o ?? '');
+      setAnthropicKey(a ?? '');
+      setExtractionProvider(p ?? 'openai');
+      checkServerHealth().then(setServerHealth);
+    })();
   }, []);
 
   const addFiles = useCallback((incoming: FileList | File[]) => {
@@ -82,9 +95,11 @@ export function UploadView() {
   const handleProcess = async () => {
     if (files.length === 0) return;
 
-    const key = (await getSetting<string>('extractionKey')) ?? '';
     const provider = (await getSetting<ExtractionProvider>('extractionProvider')) ?? 'openai';
-    setApiKey(key);
+    await migrateLegacyExtractionKey();
+    const key = await getExtractionKeyForProvider(provider);
+    setOpenaiKey((await getSetting<string>(EXTRACTION_KEY_OPENAI)) ?? '');
+    setAnthropicKey((await getSetting<string>(EXTRACTION_KEY_ANTHROPIC)) ?? '');
     setExtractionProvider(provider);
 
     const envFallback =
@@ -187,19 +202,19 @@ export function UploadView() {
 
   const ext = (f: File) => f.name.split('.').pop()?.toLowerCase() ?? '';
   const openaiReady =
-    apiKey.trim().length > 0 || !!(serverHealth?.online && serverHealth.openaiEnvConfigured);
+    openaiKey.trim().length > 0 || !!(serverHealth?.online && serverHealth.openaiEnvConfigured);
   const anthropicReady =
-    apiKey.trim().length > 0 || !!(serverHealth?.online && serverHealth.anthropicEnvConfigured);
+    anthropicKey.trim().length > 0 || !!(serverHealth?.online && serverHealth.anthropicEnvConfigured);
   const hasCredentials = extractionProvider === 'openai' ? openaiReady : anthropicReady;
   const anthropicNeedsServer = extractionProvider === 'anthropic' && !serverHealth?.online;
   const canProcess = hasCredentials && !anthropicNeedsServer;
 
   return (
-    <div className="flex-1 overflow-auto p-6 space-y-6 max-w-3xl mx-auto w-full">
+    <div className="mx-auto min-h-0 w-full max-w-3xl space-y-6 px-4 py-4 sm:p-6">
       <div>
         <h1 className="text-xl font-semibold text-white">Upload Documents</h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          Upload equity documents — ChatGPT or Claude extracts every grant (see Settings for provider and API key).
+          Upload equity documents — ChatGPT or Claude extracts every grant (see Secure vault for provider and API key).
         </p>
       </div>
 
@@ -235,7 +250,7 @@ export function UploadView() {
         <div className="flex items-start gap-3 bg-amber-950/40 border border-amber-800/60 rounded-xl px-4 py-3">
           <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
           <div className="text-sm text-amber-200">
-            Claude extraction needs the local API server. Run <code className="font-mono text-xs">npm start</code> in this repo, or switch to ChatGPT in Settings for browser-only OpenAI calls.
+            Claude extraction needs the local API server. Run <code className="font-mono text-xs">npm start</code> in this repo, or switch to ChatGPT in Secure vault for browser-only OpenAI calls.
           </div>
         </div>
       )}
@@ -247,22 +262,23 @@ export function UploadView() {
           <div className="text-sm">
             <span className="text-amber-300 font-medium">No credentials for the selected provider.</span>
             <span className="text-amber-500 ml-2">
-              Go to{' '}
-              <button
-                className="text-amber-300 underline underline-offset-2"
-                onClick={() => usePortfolioStore.getState().setView('settings')}
-              >
-                Settings
-              </button>
-              {extractionProvider === 'openai' ? (
+              {backendHasAuth ? (
                 <>
-                  {' '}and add an OpenAI key (<code className="font-mono text-xs">sk-…</code>), or start the server with{' '}
-                  <code className="font-mono text-xs">OPENAI_API_KEY</code> in <code className="font-mono text-xs">.env</code>.
+                  Open{' '}
+                  <button
+                    className="text-amber-300 underline underline-offset-2"
+                    onClick={() => usePortfolioStore.getState().setView('vault')}
+                  >
+                    Secure vault
+                  </button>
+                  {' '}to set provider and API key, or configure{' '}
+                  <code className="font-mono text-xs">OPENAI_API_KEY</code> /{' '}
+                  <code className="font-mono text-xs">ANTHROPIC_API_KEY</code> in the server <code className="font-mono text-xs">.env</code>.
                 </>
               ) : (
                 <>
-                  {' '}and add an Anthropic key (<code className="font-mono text-xs">sk-ant-…</code>), or start the server with{' '}
-                  <code className="font-mono text-xs">ANTHROPIC_API_KEY</code> in <code className="font-mono text-xs">.env</code>.
+                  Sign in and open <span className="text-amber-300">Secure vault</span> for provider and key, or set{' '}
+                  <code className="font-mono text-xs">OPENAI_API_KEY</code> / <code className="font-mono text-xs">ANTHROPIC_API_KEY</code> in the server <code className="font-mono text-xs">.env</code>.
                 </>
               )}
             </span>

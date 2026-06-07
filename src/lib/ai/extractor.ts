@@ -1,6 +1,7 @@
 import type { GrantRecord, ExtractedField, GrantType, VestingFrequency, ExtractionProvider } from '../../types';
 import { v4 as uuidv4 } from 'uuid';
 import { getSetting } from '../storage';
+import { getExtractionKeyForProvider } from '../extractionKeys';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Raw types returned by the AI (OpenAI + Anthropic use the same schema)
@@ -259,10 +260,10 @@ export async function extractGrantsFromText(
     return allGrants;
   }
 
-  const key = apiKey || (await getSetting<string>('extractionKey')) || '';
+  const key = apiKey.trim() || (await getExtractionKeyForProvider(provider)) || '';
   if (!key) {
     throw new Error(
-      'No API key in Settings. Add your key for the selected provider, or run npm start so the extraction server can use .env keys.',
+      'No API key in Secure vault. Add your key for the selected provider under Secure vault, or run npm start so the extraction server can use .env keys.',
     );
   }
 

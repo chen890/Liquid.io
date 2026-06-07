@@ -312,7 +312,7 @@ export function ReviewView() {
   }, 0);
 
   return (
-    <div className="flex-1 overflow-auto p-6 space-y-6">
+    <div className="min-h-0 w-full space-y-6 px-4 py-4 sm:p-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold text-white">Extraction Review</h1>

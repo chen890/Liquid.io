@@ -20,7 +20,7 @@ uv sync
 uv run uvicorn main:app --reload --port 3712
 ```
 
-Copy `.env.example` to `.env` and fill in credentials for your environment. **Never commit `.env`.** Grant extraction uses **ChatGPT (OpenAI)** or **Claude (Anthropic)** depending on Settings; optional `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` in `.env` let the extraction server run without pasting keys in the browser.
+Copy `.env.example` to `.env` and fill in credentials for your environment. **Never commit `.env`.** Grant extraction uses **ChatGPT (OpenAI)** or **Claude (Anthropic)** depending on your choice in **Secure vault**; optional `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` in `.env` let the extraction server run without pasting keys in the browser.
 
 ### User accounts & vault
 

@@ -57,7 +57,7 @@ export function InsightsView() {
   }
 
   return (
-    <div className="flex-1 overflow-auto p-6 space-y-6">
+    <div className="min-h-0 w-full space-y-6 px-4 py-4 sm:p-6">
       <div>
         <h1 className="text-xl font-semibold text-white">AI Insights</h1>
         <p className="text-sm text-slate-500 mt-0.5">

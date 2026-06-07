@@ -1,7 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, Route, Routes, Link } from 'react-router-dom';
 import { SignInPage, SignInBackendMissing } from './components/auth/SignInPage';
 import { Sidebar } from './components/layout/Sidebar';
+import { MainHeader } from './components/layout/MainHeader';
+import { ScrollToTopFab } from './components/layout/ScrollToTopFab';
 import { Dashboard } from './components/views/Dashboard';
 import { UploadView } from './components/views/UploadView';
 import { ReviewView } from './components/views/ReviewView';
@@ -17,6 +19,7 @@ import { SettingsView } from './components/views/SettingsView';
 import { VaultView } from './components/views/VaultView';
 import { useAuthStore } from './store/authStore';
 import { usePortfolioStore } from './store/portfolioStore';
+import { useThemeStore } from './store/themeStore';
 
 function ViewRouter() {
   const { currentView } = usePortfolioStore();
@@ -42,29 +45,71 @@ function ViewRouter() {
 }
 
 function MainLayout() {
+  const mainScrollRef = useRef<HTMLDivElement>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { loadPortfolio, isLoading } = usePortfolioStore();
+  const currentView = usePortfolioStore((s) => s.currentView);
   const { user, backendHasAuth } = useAuthStore();
+  const day = useThemeStore((s) => s.appearance) === 'day';
+
+  const closeMobileNav = () => setMobileNavOpen(false);
 
   useEffect(() => {
     if (user || !backendHasAuth) void loadPortfolio();
   }, [user, backendHasAuth, loadPortfolio]);
 
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [currentView]);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const onChange = () => setMobileNavOpen(false);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [mobileNavOpen]);
+
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-950">
+      <div className={`flex min-h-screen items-center justify-center ${day ? 'bg-slate-100' : 'bg-slate-950'}`}>
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-          <span className="text-sm text-slate-500">Loading portfolio...</span>
+          <span className={`text-sm ${day ? 'text-slate-600' : 'text-slate-500'}`}>Loading portfolio...</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen bg-[#0b0d14]">
-      <Sidebar />
-      <main className="flex-1 flex flex-col min-h-screen overflow-hidden">
-        <ViewRouter />
+    <div
+      className={`flex h-[100dvh] max-h-[100dvh] min-h-0 w-full overflow-hidden ${
+        day ? 'bg-slate-100' : 'bg-[#0b0d14]'
+      }`}>
+      {mobileNavOpen && (
+        <button
+          type="button"
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[1px] md:hidden"
+          aria-label="Close menu"
+          onClick={closeMobileNav}
+        />
+      )}
+      <Sidebar mobileOpen={mobileNavOpen} onCloseMobile={closeMobileNav} />
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <MainHeader onMenuClick={() => setMobileNavOpen(true)} mobileNavOpen={mobileNavOpen} />
+        <div
+          ref={mainScrollRef}
+          className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain">
+          <ViewRouter />
+        </div>
+        <ScrollToTopFab scrollRef={mainScrollRef} />
       </main>
     </div>
   );

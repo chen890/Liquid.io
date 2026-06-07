@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Lock, Trash2, Upload, Download, RefreshCw, Eye, EyeOff } from 'lucide-react';
 import * as vault from '../../lib/authApi';
 import type { VaultFileMeta, VaultSecretMeta } from '../../lib/authApi';
+import { GrantExtractionSections } from '../vault/GrantExtractionSections';
 import { Button } from '../ui/Button';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 
@@ -106,14 +107,14 @@ export function VaultView() {
   }
 
   return (
-    <div className="flex-1 overflow-auto p-6 space-y-6 max-w-4xl mx-auto w-full">
+    <div className="mx-auto min-h-0 w-full max-w-4xl space-y-6 px-4 py-4 sm:p-6">
       <div>
         <h1 className="text-xl font-semibold text-white flex items-center gap-2">
           <Lock className="w-6 h-6 text-indigo-400" />
           Secure vault
         </h1>
         <p className="text-sm text-slate-500 mt-1">
-          Encrypted secrets and files, scoped to your account. Values are not written to application logs.
+          Encrypted secrets and files, scoped to your account. Grant extraction: pick an active agent, then save <strong className="text-slate-400">separate</strong> OpenAI and Anthropic keys (IndexedDB). Server vault secrets are below.
         </p>
       </div>
 
@@ -128,9 +129,11 @@ export function VaultView() {
         </Button>
       </div>
 
+      <GrantExtractionSections />
+
       <Card padding="md">
         <CardHeader>
-          <CardTitle>Secrets & API keys</CardTitle>
+          <CardTitle>Vault secrets</CardTitle>
         </CardHeader>
         <form onSubmit={handleAddSecret} className="space-y-3 mb-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

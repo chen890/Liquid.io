@@ -111,7 +111,7 @@ export function SignInPage() {
   const hasSocial = providers.google || providers.github;
 
   return (
-    <div className="min-h-screen bg-[#0b0d14] flex flex-col items-center justify-center p-6">
+    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-[#0b0d14] px-4 py-8 sm:p-6">
       <div className="w-full max-w-md">
         <div className="flex items-center gap-3 justify-center mb-8">
           <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center">
@@ -123,7 +123,7 @@ export function SignInPage() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-6 shadow-xl">
+        <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 shadow-xl sm:p-6">
           <p className="text-xs text-slate-500 text-center mb-4">
             Use your email and password, or sign in with a provider when the API server has OAuth keys in <code className="text-slate-400">.env</code>.
           </p>
@@ -277,8 +277,8 @@ export function SignInPage() {
 export function SignInBackendMissing() {
   const navigate = useNavigate();
   return (
-    <div className="min-h-screen bg-[#0b0d14] flex flex-col items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-xl border border-slate-800 bg-slate-950/80 p-6 shadow-xl space-y-4">
+    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-[#0b0d14] px-4 py-8 sm:p-6">
+      <div className="w-full max-w-md space-y-4 rounded-xl border border-slate-800 bg-slate-950/80 p-4 shadow-xl sm:p-6">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-amber-600/20 border border-amber-800/50 flex items-center justify-center">
             <Server className="w-5 h-5 text-amber-400" />

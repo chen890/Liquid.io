@@ -226,7 +226,7 @@ export function GrantsView() {
   const selectClass = 'bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-indigo-500';
 
   return (
-    <div className="flex-1 overflow-auto p-6 space-y-4">
+    <div className="min-h-0 w-full space-y-4 px-4 py-4 sm:p-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-white">Grant Explorer</h1>

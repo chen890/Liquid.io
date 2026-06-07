@@ -232,7 +232,7 @@ export function Dashboard() {
   };
 
   return (
-    <div className="flex-1 overflow-auto p-6 space-y-6">
+    <div className="min-h-0 w-full space-y-6 px-4 py-4 sm:p-6">
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -248,7 +248,7 @@ export function Dashboard() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Total Grants"   value={String(stats.totalGrants)}
           sub={`${stats.totalShares.toLocaleString()} total shares`} icon={Layers} accent="bg-indigo-600" />
 

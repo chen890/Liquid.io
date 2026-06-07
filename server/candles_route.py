@@ -103,6 +103,11 @@ async def _fetch_candles(ticker: str, interval: str, range_: str) -> dict[str, A
     return result
 
 
+async def fetch_candles(ticker: str, interval: str, range_: str) -> dict[str, Any]:
+    """Public wrapper for other routes (e.g. market context) that need Yahoo OHLCV."""
+    return await _fetch_candles(ticker, interval, range_)
+
+
 def register(app: Any) -> None:
     from fastapi import Query  # type: ignore[import]
 

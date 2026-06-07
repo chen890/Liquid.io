@@ -150,7 +150,7 @@ export function RemindersView() {
   const highCount     = reminders.filter((r) => r.urgency === 'high').length;
 
   return (
-    <div className="flex-1 overflow-auto p-6 space-y-6">
+    <div className="min-h-0 w-full space-y-6 px-4 py-4 sm:p-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-white flex items-center gap-2">

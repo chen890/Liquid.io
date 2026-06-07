@@ -201,6 +201,9 @@ _auth.register(app)
 _candles = _il.import_module("candles_route")
 _candles.register(app)
 
+_market_ctx = _il.import_module("market_context_route")
+_market_ctx.register(app)
+
 
 class ExtractRequest(BaseModel):
     filename: str
