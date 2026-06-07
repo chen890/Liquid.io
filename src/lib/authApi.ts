@@ -14,6 +14,16 @@ async function readApiError(r: Response): Promise<string> {
   return text.slice(0, 400) || `HTTP ${r.status}`;
 }
 
+function formatDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((x) => (typeof x === 'object' && x !== null && 'msg' in x ? String((x as { msg: string }).msg) : String(x)))
+      .join('; ');
+  }
+  return '';
+}
+
 export interface AuthUser {
   id: number;
   email: string;
@@ -29,6 +39,45 @@ async function parseJson<T>(r: Response): Promise<T> {
   }
 }
 
+export type SessionProbe =
+  | { status: 'authenticated'; user: AuthUser }
+  | { status: 'anonymous' }
+  | { status: 'no_backend' }
+  | { status: 'error'; message: string };
+
+/**
+ * Detect whether the Python API (with auth routes) is reachable.
+ * Static hosts (e.g. Vercel SPA) return 404 for /api/* — treat as no_backend
+ * so the dashboard still runs local-first without blocking on login.
+ */
+export async function probeSession(): Promise<SessionProbe> {
+  try {
+    const r = await fetch('/api/auth/me', { credentials: 'include' });
+    const text = await r.text();
+    if (r.status === 404) return { status: 'no_backend' };
+    if (r.status === 401) return { status: 'anonymous' };
+    if (!r.ok) {
+      try {
+        const j = JSON.parse(text) as { detail?: unknown };
+        const msg = formatDetail(j.detail) || text.slice(0, 400) || `HTTP ${r.status}`;
+        return { status: 'error', message: msg };
+      } catch {
+        return { status: 'error', message: text.slice(0, 400) || `HTTP ${r.status}` };
+      }
+    }
+    try {
+      const d = JSON.parse(text) as { user?: AuthUser };
+      if (!d.user) return { status: 'error', message: 'Invalid server response' };
+      return { status: 'authenticated', user: d.user };
+    } catch {
+      if (text.includes('NOT_FOUND')) return { status: 'no_backend' };
+      return { status: 'error', message: 'Unexpected response from /api/auth/me' };
+    }
+  } catch {
+    return { status: 'no_backend' };
+  }
+}
+
 export async function authMe(): Promise<{ ok: boolean; user: AuthUser }> {
   const r = await fetch('/api/auth/me', { credentials: 'include' });
   if (r.status === 401) {
@@ -38,16 +87,6 @@ export async function authMe(): Promise<{ ok: boolean; user: AuthUser }> {
   }
   if (!r.ok) throw new Error(await readApiError(r));
   return parseJson(r);
-}
-
-function formatDetail(detail: unknown): string {
-  if (typeof detail === 'string') return detail;
-  if (Array.isArray(detail)) {
-    return detail
-      .map((x) => (typeof x === 'object' && x !== null && 'msg' in x ? String((x as { msg: string }).msg) : String(x)))
-      .join('; ');
-  }
-  return '';
 }
 
 export async function authRegister(email: string, password: string): Promise<{ user: AuthUser }> {

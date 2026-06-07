@@ -30,6 +30,8 @@ For local dev, keys are created automatically under `data/` on first run. In pro
 
 The React app requires a signed-in user before loading the dashboard. Use **Secure vault** in the sidebar for API keys and encrypted file uploads.
 
+On a **static-only** deploy (no Python API, e.g. default Vercel SPA), `/api/auth/me` returns 404 and the app runs **without** the login gate so local IndexedDB data still works; the vault nav is hidden until you run the full stack locally.
+
 ### Docker
 
 ```bash

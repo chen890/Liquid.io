@@ -19,8 +19,10 @@ import { usePortfolioStore } from './store/portfolioStore';
 
 function ViewRouter() {
   const { currentView } = usePortfolioStore();
+  const backendHasAuth = useAuthStore((s) => s.backendHasAuth);
+  const view = !backendHasAuth && currentView === 'vault' ? 'dashboard' : currentView;
 
-  switch (currentView) {
+  switch (view) {
     case 'dashboard': return <Dashboard />;
     case 'upload': return <UploadView />;
     case 'review': return <ReviewView />;
@@ -40,15 +42,16 @@ function ViewRouter() {
 
 export default function App() {
   const { loadPortfolio, isLoading } = usePortfolioStore();
-  const { user, authChecked, authError, initAuth } = useAuthStore();
+  const { user, authChecked, authError, backendHasAuth, initAuth } = useAuthStore();
 
   useEffect(() => {
     void initAuth();
   }, [initAuth]);
 
   useEffect(() => {
-    if (user) void loadPortfolio();
-  }, [user, loadPortfolio]);
+    if (!authChecked) return;
+    if (user || !backendHasAuth) void loadPortfolio();
+  }, [authChecked, user, backendHasAuth, loadPortfolio]);
 
   if (!authChecked) {
     return (
@@ -58,7 +61,7 @@ export default function App() {
     );
   }
 
-  if (authError) {
+  if (authError && backendHasAuth) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 p-6 gap-4">
         <p className="text-slate-300 text-center max-w-md">{authError}</p>
@@ -76,7 +79,7 @@ export default function App() {
     );
   }
 
-  if (!user) {
+  if (backendHasAuth && !user) {
     return <AuthScreen />;
   }
 

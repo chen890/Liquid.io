@@ -28,8 +28,13 @@ const navItems: NavItem[] = [
 
 export function Sidebar() {
   const { currentView, setView, portfolio, pendingGrants } = usePortfolioStore();
-  const { user, logout } = useAuthStore();
+  const { user, logout, backendHasAuth } = useAuthStore();
   const { grants, tradingWindows } = portfolio;
+
+  const visibleNav = useMemo(
+    () => navItems.filter((item) => backendHasAuth || item.id !== 'vault'),
+    [backendHasAuth],
+  );
 
   // Upcoming reminders count (next 30 days)
   const reminderCount = useMemo(() => {
@@ -79,7 +84,7 @@ export function Sidebar() {
       )}
 
       <nav className="flex-1 px-2 py-3 space-y-0.5">
-        {navItems.map((item) => {
+        {visibleNav.map((item) => {
           const Icon     = item.icon;
           const isActive = currentView === item.id;
           const badge    = badgeFor(item.id);
@@ -116,7 +121,7 @@ export function Sidebar() {
       )}
 
       <div className="px-4 py-3 border-t border-slate-800 space-y-2">
-        {user && (
+        {backendHasAuth && user && (
           <div className="flex items-center gap-2 text-xs text-slate-400 min-w-0">
             <span className="truncate flex-1" title={user.email}>{user.email}</span>
             <button
