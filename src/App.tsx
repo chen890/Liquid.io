@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
-import { SignInPage } from './components/auth/SignInPage';
+import { Navigate, Route, Routes, Link } from 'react-router-dom';
+import { SignInPage, SignInBackendMissing } from './components/auth/SignInPage';
 import { Sidebar } from './components/layout/Sidebar';
 import { Dashboard } from './components/views/Dashboard';
 import { UploadView } from './components/views/UploadView';
@@ -72,9 +72,33 @@ function MainLayout() {
 
 function SignInRoute() {
   const { backendHasAuth, user } = useAuthStore();
-  if (!backendHasAuth) return <Navigate to="/" replace />;
   if (user) return <Navigate to="/" replace />;
+  if (!backendHasAuth) return <SignInBackendMissing />;
   return <SignInPage />;
+}
+
+function SessionProbeErrorScreen() {
+  const { authError, initAuth } = useAuthStore();
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 p-6 gap-4">
+      <p className="text-slate-300 text-center max-w-md">{authError}</p>
+      <p className="text-sm text-slate-500 text-center max-w-md">
+        The auth API responded with an error. Start or restart the API from the project root:{' '}
+        <code className="text-indigo-400">npm run server</code> or <code className="text-indigo-400">npm run start</code>
+      </p>
+      <div className="flex flex-wrap items-center justify-center gap-4">
+        <button
+          type="button"
+          onClick={() => void initAuth()}
+          className="text-sm text-indigo-400 hover:underline">
+          Retry session check
+        </button>
+        <Link to="/sign-in" className="text-sm text-slate-400 hover:text-indigo-400 hover:underline">
+          Open sign-in page
+        </Link>
+      </div>
+    </div>
+  );
 }
 
 function AppShell() {
@@ -92,31 +116,19 @@ function AppShell() {
     );
   }
 
-  if (authError && backendHasAuth) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 p-6 gap-4">
-        <p className="text-slate-300 text-center max-w-md">{authError}</p>
-        <p className="text-sm text-slate-500 text-center max-w-md">
-          Start the API server from the project root: <code className="text-indigo-400">npm run server</code> or{' '}
-          <code className="text-indigo-400">npm run start</code>
-        </p>
-        <button
-          type="button"
-          onClick={() => void initAuth()}
-          className="text-sm text-indigo-400 hover:underline">
-          Retry
-        </button>
-      </div>
-    );
-  }
-
   return (
     <Routes>
       <Route path="/sign-in" element={<SignInRoute />} />
       <Route
         path="/*"
         element={
-          backendHasAuth && !user ? <Navigate to="/sign-in" replace /> : <MainLayout />
+          authError && backendHasAuth ? (
+            <SessionProbeErrorScreen />
+          ) : backendHasAuth && !user ? (
+            <Navigate to="/sign-in" replace />
+          ) : (
+            <MainLayout />
+          )
         }
       />
     </Routes>

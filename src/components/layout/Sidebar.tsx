@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import {
   LayoutDashboard, Upload, TrendingUp, FileText, FolderOpen,
   Lightbulb, Calculator, Bell, BarChart2, ArrowLeftRight, CandlestickChart, Settings, ChevronRight,
@@ -121,6 +122,14 @@ export function Sidebar() {
       )}
 
       <div className="px-4 py-3 border-t border-slate-800 space-y-2">
+        {!backendHasAuth && (
+          <Link
+            to="/sign-in"
+            className="flex items-center gap-2 text-xs text-amber-500/90 hover:text-amber-400 border border-amber-900/40 rounded-lg px-2 py-1.5 hover:bg-amber-950/30 transition-colors">
+            <Lock className="w-3.5 h-3.5 flex-shrink-0" />
+            <span>Sign-in / API server</span>
+          </Link>
+        )}
         {backendHasAuth && user && (
           <div className="flex items-center gap-2 text-xs text-slate-400 min-w-0">
             <span className="truncate flex-1" title={user.email}>{user.email}</span>

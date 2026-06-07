@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { TrendingUp, Mail, Lock, LogIn, UserPlus } from 'lucide-react';
+import { TrendingUp, Mail, Lock, LogIn, UserPlus, Server } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { Button } from '../ui/Button';
 import * as authApi from '../../lib/authApi';
@@ -124,52 +124,9 @@ export function SignInPage() {
         </div>
 
         <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-6 shadow-xl">
-          <div className="space-y-3 mb-6">
-            <p className="text-xs text-slate-500 text-center uppercase tracking-wide">Continue with</p>
-            <div className="grid gap-2">
-              {providers.google && (
-                <button
-                  type="button"
-                  onClick={() => authApi.navigateToOAuthStart('google')}
-                  className="flex w-full items-center justify-center gap-3 rounded-lg border border-slate-700 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-100 transition-colors">
-                  <GoogleIcon className="w-5 h-5 shrink-0" />
-                  Google
-                </button>
-              )}
-              {providers.github && (
-                <button
-                  type="button"
-                  onClick={() => authApi.navigateToOAuthStart('github')}
-                  className="flex w-full items-center justify-center gap-3 rounded-lg border border-slate-600 bg-slate-800 px-4 py-2.5 text-sm font-medium text-slate-100 hover:bg-slate-700 transition-colors">
-                  <GitHubIcon className="w-5 h-5 shrink-0 text-white" />
-                  GitHub
-                </button>
-              )}
-              <button
-                type="button"
-                disabled
-                title="Apple Sign In requires extra server configuration"
-                className="flex w-full items-center justify-center gap-3 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2.5 text-sm font-medium text-slate-500 cursor-not-allowed opacity-60">
-                <AppleIcon className="w-5 h-5 shrink-0" />
-                Apple <span className="text-[10px] font-normal">(soon)</span>
-              </button>
-              <button
-                type="button"
-                disabled
-                title="Microsoft sign-in is not enabled yet"
-                className="flex w-full items-center justify-center gap-3 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2.5 text-sm font-medium text-slate-500 cursor-not-allowed opacity-60">
-                Microsoft <span className="text-[10px] font-normal">(soon)</span>
-              </button>
-            </div>
-            <div className="relative py-2">
-              <div className="absolute inset-0 flex items-center" aria-hidden>
-                <div className="w-full border-t border-slate-800" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase tracking-wide">
-                <span className="bg-slate-950/80 px-2 text-slate-600">or email</span>
-              </div>
-            </div>
-          </div>
+          <p className="text-xs text-slate-500 text-center mb-4">
+            Use your email and password, or sign in with a provider when the API server has OAuth keys in <code className="text-slate-400">.env</code>.
+          </p>
 
           <div className="flex rounded-lg bg-slate-900/80 p-0.5 mb-6">
             <button
@@ -235,18 +192,120 @@ export function SignInPage() {
             </Button>
           </form>
 
-          {!hasSocial && (
-            <p className="text-[11px] text-slate-600 mt-4 text-center">
-              Configure <code className="text-slate-500">GOOGLE_CLIENT_ID</code> /{' '}
-              <code className="text-slate-500">GITHUB_CLIENT_ID</code> in <code className="text-slate-500">.env</code> to
-              enable social sign-in. OAuth callbacks must use <code className="text-slate-500">FRONTEND_PUBLIC_URL</code>{' '}
-              (e.g. Vite dev: <code className="text-slate-500">http://localhost:5173</code>).
-            </p>
-          )}
+          <div className="relative py-5 mt-2">
+            <div className="absolute inset-0 flex items-center" aria-hidden>
+              <div className="w-full border-t border-slate-800" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase tracking-wide">
+              <span className="bg-slate-950/80 px-2 text-slate-600">Or continue with</span>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="grid gap-2">
+              <button
+                type="button"
+                disabled={!providers.google}
+                title={
+                  providers.google
+                    ? 'Sign in with Google'
+                    : 'Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the server .env (both required).'
+                }
+                onClick={() => providers.google && authApi.navigateToOAuthStart('google')}
+                className={`flex w-full items-center justify-center gap-3 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors ${
+                  providers.google
+                    ? 'border-slate-700 bg-white text-slate-900 hover:bg-slate-100'
+                    : 'border-slate-800 bg-slate-900/40 text-slate-500 cursor-not-allowed'
+                }`}>
+                <GoogleIcon className="w-5 h-5 shrink-0" />
+                Google
+                {!providers.google && <span className="text-[10px] font-normal text-slate-600">(not configured)</span>}
+              </button>
+              <button
+                type="button"
+                disabled={!providers.github}
+                title={
+                  providers.github
+                    ? 'Sign in with GitHub'
+                    : 'Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in the server .env (both required).'
+                }
+                onClick={() => providers.github && authApi.navigateToOAuthStart('github')}
+                className={`flex w-full items-center justify-center gap-3 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors ${
+                  providers.github
+                    ? 'border-slate-600 bg-slate-800 text-slate-100 hover:bg-slate-700'
+                    : 'border-slate-800 bg-slate-900/40 text-slate-500 cursor-not-allowed'
+                }`}>
+                <GitHubIcon className="w-5 h-5 shrink-0 text-white" />
+                GitHub
+                {!providers.github && <span className="text-[10px] font-normal text-slate-600">(not configured)</span>}
+              </button>
+              <button
+                type="button"
+                disabled
+                title="Apple Sign In requires extra server configuration"
+                className="flex w-full items-center justify-center gap-3 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2.5 text-sm font-medium text-slate-500 cursor-not-allowed opacity-60">
+                <AppleIcon className="w-5 h-5 shrink-0" />
+                Apple <span className="text-[10px] font-normal">(soon)</span>
+              </button>
+              <button
+                type="button"
+                disabled
+                title="Microsoft sign-in is not enabled yet"
+                className="flex w-full items-center justify-center gap-3 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2.5 text-sm font-medium text-slate-500 cursor-not-allowed opacity-60">
+                Microsoft <span className="text-[10px] font-normal">(soon)</span>
+              </button>
+            </div>
+            {!hasSocial && (
+              <p className="text-[11px] text-slate-600 text-center leading-relaxed">
+                OAuth buttons stay disabled until the API server loads matching <code className="text-slate-500">GOOGLE_*</code> /{' '}
+                <code className="text-slate-500">GITHUB_*</code> values. Register redirect URLs as{' '}
+                <code className="text-slate-500 break-all">{`{FRONTEND_PUBLIC_URL}/api/auth/oauth/google/callback`}</code> (and the GitHub equivalent).
+              </p>
+            )}
+          </div>
 
           <p className="text-[11px] text-slate-600 mt-6 leading-relaxed">
             Session cookie is httpOnly. Vault data is encrypted at rest when the API server is running.
           </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Shown at `/sign-in` when the SPA cannot reach auth APIs (no proxy / server off / static deploy). */
+export function SignInBackendMissing() {
+  const navigate = useNavigate();
+  return (
+    <div className="min-h-screen bg-[#0b0d14] flex flex-col items-center justify-center p-6">
+      <div className="w-full max-w-md rounded-xl border border-slate-800 bg-slate-950/80 p-6 shadow-xl space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-600/20 border border-amber-800/50 flex items-center justify-center">
+            <Server className="w-5 h-5 text-amber-400" />
+          </div>
+          <div>
+            <h1 className="text-lg font-semibold text-white">Sign-in needs the API server</h1>
+            <p className="text-xs text-slate-500">The browser did not detect <code className="text-slate-400">/api/auth/me</code></p>
+          </div>
+        </div>
+        <p className="text-sm text-slate-400 leading-relaxed">
+          Accounts, OAuth, and the vault run on the FastAPI app (default port <strong className="text-slate-300">3712</strong>).
+          Vite proxies <code className="text-slate-500">/api</code> to it during local dev.
+        </p>
+        <div className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2.5 font-mono text-xs text-slate-300 space-y-1">
+          <p className="text-slate-500 font-sans text-[11px] mb-1">From the repo root:</p>
+          <p>npm run start</p>
+          <p className="text-slate-500 pt-1">or two terminals:</p>
+          <p>npm run server</p>
+          <p>npm run dev</p>
+        </div>
+        <p className="text-xs text-slate-600">
+          Static-only deploys (e.g. SPA without the Python API) stay signed out; run the full stack locally to use sign-in.
+        </p>
+        <div className="pt-2">
+          <Button variant="ghost" className="w-full justify-center" onClick={() => navigate('/', { replace: true })}>
+            Continue without signing in
+          </Button>
         </div>
       </div>
     </div>
