@@ -11,6 +11,10 @@ dependencies = [
     "me-auth-client>=0.39.0",
     "openai>=1.75",
     "requests-oauthlib>=2.0.0",
+    "cryptography>=42.0.0",
+    "bcrypt>=4.0.0",
+    "PyJWT>=2.8.0",
+    "python-multipart>=0.0.9",
 ]
 
 [tool.uv]

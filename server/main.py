@@ -35,6 +35,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+# Default dev origins (Vite + preview). Override with CORS_ORIGINS=comma,separated
+_DEFAULT_CORS = (
+    "http://localhost:5173,http://127.0.0.1:5173,"
+    "http://localhost:4173,http://127.0.0.1:4173"
+)
+
 # ── Load .env from project root ───────────────────────────────────────────────
 ROOT = Path(__file__).parent.parent
 load_dotenv(ROOT / ".env", override=True)
@@ -201,9 +207,12 @@ def _chunk(text: str, max_chars: int = 12_000) -> list[str]:
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(title="EquityLens extraction server")
 
+_cors_raw = os.getenv("CORS_ORIGINS", _DEFAULT_CORS).strip()
+_cors_origins = [o.strip() for o in _cors_raw.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -213,6 +222,9 @@ import importlib as _il, sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))
 _etrade = _il.import_module("etrade")
 _etrade.register(app)
+
+_auth = _il.import_module("auth_routes")
+_auth.register(app)
 
 # Register candle route
 _candles = _il.import_module("candles_route")
