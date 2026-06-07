@@ -190,4 +190,5 @@ export type AppView =
   | 'reminders'
   | 'analytics'
   | 'chart'
-  | 'settings';
+  | 'settings'
+  | 'vault';

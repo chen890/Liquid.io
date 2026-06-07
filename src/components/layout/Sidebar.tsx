@@ -2,9 +2,11 @@ import React, { useMemo } from 'react';
 import {
   LayoutDashboard, Upload, TrendingUp, FileText, FolderOpen,
   Lightbulb, Calculator, Bell, BarChart2, ArrowLeftRight, CandlestickChart, Settings, ChevronRight,
+  Lock, LogOut,
 } from 'lucide-react';
 import type { AppView } from '../../types';
 import { usePortfolioStore } from '../../store/portfolioStore';
+import { useAuthStore } from '../../store/authStore';
 import { currentTradingWindow } from '../../lib/tradingWindows';
 
 interface NavItem { id: AppView; label: string; icon: React.ElementType }
@@ -20,11 +22,13 @@ const navItems: NavItem[] = [
   { id: 'analytics',    label: 'Analytics',         icon: BarChart2 },
   { id: 'transactions', label: 'Transactions',      icon: ArrowLeftRight },
   { id: 'reminders',    label: 'Reminders',         icon: Bell },
+  { id: 'vault',        label: 'Secure vault',      icon: Lock },
   { id: 'settings',     label: 'Settings',          icon: Settings },
 ];
 
 export function Sidebar() {
   const { currentView, setView, portfolio, pendingGrants } = usePortfolioStore();
+  const { user, logout } = useAuthStore();
   const { grants, tradingWindows } = portfolio;
 
   // Upcoming reminders count (next 30 days)
@@ -111,7 +115,19 @@ export function Sidebar() {
         </div>
       )}
 
-      <div className="px-4 py-3 border-t border-slate-800">
+      <div className="px-4 py-3 border-t border-slate-800 space-y-2">
+        {user && (
+          <div className="flex items-center gap-2 text-xs text-slate-400 min-w-0">
+            <span className="truncate flex-1" title={user.email}>{user.email}</span>
+            <button
+              type="button"
+              onClick={() => void logout()}
+              className="flex-shrink-0 p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800"
+              title="Sign out">
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        )}
         <div className="text-xs text-slate-600">
           {portfolio.grants.length} grants · {portfolio.documents.length} docs
         </div>

@@ -36,3 +36,6 @@ dist-ssr
 *.sw?
 .vercel
 .env*
+
+# Per-user auth DB and auto-generated crypto material (never commit)
+/data/

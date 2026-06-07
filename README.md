@@ -22,6 +22,14 @@ uv run uvicorn main:app --reload --port 3712
 
 Copy `.env.example` to `.env` and fill in credentials for your environment. **Never commit `.env`.**
 
+### User accounts & vault
+
+The Python server stores users in **SQLite** (`data/users.db` by default), hashes passwords with **bcrypt**, issues **JWT** sessions in an **httpOnly** cookie (`ep_session`), and encrypts vault secrets and file blobs at rest with **Fernet** (symmetric key from `APP_ENCRYPTION_KEY` or auto-generated `data/.fernet_key` — **back up this key**; losing it means vault data cannot be decrypted).
+
+For local dev, keys are created automatically under `data/` on first run. In production, set `JWT_SECRET` and `APP_ENCRYPTION_KEY` explicitly, restrict `CORS_ORIGINS` to your real SPA origin(s), and serve the app over **HTTPS** so `Secure` cookies apply.
+
+The React app requires a signed-in user before loading the dashboard. Use **Secure vault** in the sidebar for API keys and encrypted file uploads.
+
 ### Docker
 
 ```bash
