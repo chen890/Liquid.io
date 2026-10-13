@@ -3,15 +3,19 @@ EquityLens extraction server (Python / FastAPI)
 
 Endpoints
 ---------
-GET  /api/health   — liveness + extraction env hints
+GET  /api/health   — liveness + backend status
 POST /api/extract  — extract equity grants from document text
 
-Extraction uses the **user-selected** provider (`openai` or `anthropic`):
-  - OpenAI Chat Completions (ChatGPT-class models, e.g. gpt-4o)
-  - Anthropic Messages API (Claude)
+Auth flow (Sofia preferred, restored from ca2f93d)
+---------
+1. Read MEEZEH_USERNAME / MEEZEH_PASSWORD from .env
+2. Call me_auth_client.meezeh_app.get_token_by_username_password() → bearer token
+3. Cache token for 50 minutes, refresh on expiry
+4. Call Sofia's OpenAI-compatible chat/completions endpoint with the token
+5. Parse JSON response → return grants list
 
-Keys are sent from the app (Settings) and/or optional `OPENAI_API_KEY` /
-`ANTHROPIC_API_KEY` in the server `.env`.
+Fallback: if Sofia/Meezeh is not configured, use the user-selected provider
+(`openai` or `anthropic`) with keys from Settings and/or `.env`.
 """
 
 from __future__ import annotations
@@ -43,6 +47,11 @@ load_dotenv(ROOT / ".env", override=True)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 PORT = int(os.getenv("EXTRACTION_SERVER_PORT", "3712"))
+SOFIA_BASE = os.getenv("SOFIA_BASE_URL", "https://sofia-api.lgw.cloud.mobileye.com/v1/api").rstrip("/")
+SOFIA_MODEL = os.getenv("SOFIA_MODEL_ID", "us.anthropic.claude-opus-4-5-20251101-v1:0")
+MEEZEH_USER = os.getenv("MEEZEH_USERNAME", "")
+MEEZEH_PASS = os.getenv("MEEZEH_PASSWORD", "")
+SOFIA_API_KEY = os.getenv("SOFIA_API_KEY", "")  # pre-obtained token, skips Meezeh auth
 OPENAI_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 OPENAI_CHAT_MODEL = os.getenv("OPENAI_EXTRACTION_MODEL", "gpt-4o").strip()
@@ -50,6 +59,43 @@ ANTHROPIC_CHAT_MODEL = os.getenv("ANTHROPIC_EXTRACTION_MODEL", "claude-sonnet-4-
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 log = logging.getLogger("equitylens")
+
+# ── Meezeh token cache ────────────────────────────────────────────────────────
+_token: str = ""
+_token_expiry: float = 0.0  # epoch seconds
+TOKEN_TTL = 50 * 60  # 50 minutes
+
+
+def get_sofia_token() -> str:
+    """Return a valid Sofia bearer token, trying sources in priority order:
+       1. SOFIA_API_KEY  — pre-obtained token pasted directly into .env
+       2. Meezeh username/password  — auto-refreshed via me_auth_client
+    """
+    global _token, _token_expiry
+
+    # 1. Static pre-obtained token
+    if SOFIA_API_KEY:
+        return SOFIA_API_KEY
+
+    # 2. Cached Meezeh token
+    if _token and time.time() < _token_expiry:
+        return _token
+
+    if not MEEZEH_USER or not MEEZEH_PASS:
+        return ""
+
+    try:
+        from me_auth_client import meezeh_app  # type: ignore[import]
+
+        token: str = meezeh_app.get_token_by_username_password(MEEZEH_USER, MEEZEH_PASS)
+        if token:
+            _token = token
+            _token_expiry = time.time() + TOKEN_TTL
+            log.info("Meezeh token refreshed  (%s...)", token[:16])
+        return _token
+    except Exception as exc:
+        log.error("Meezeh token fetch failed: %s", exc)
+        return ""
 
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -113,6 +159,21 @@ def _strip_fences(text: str) -> str:
     import re
     return re.sub(r"^```(?:json)?\s*", "", text.strip(), flags=re.IGNORECASE | re.MULTILINE) \
              .rstrip("```").strip()
+
+
+async def _call_sofia(messages: list[dict], token: str) -> str:
+    async with httpx.AsyncClient(timeout=120) as client:
+        r = await client.post(
+            f"{SOFIA_BASE}/chat/completions",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"model": SOFIA_MODEL, "messages": messages},
+        )
+        r.raise_for_status()
+        data = r.json()
+    content = data["choices"][0]["message"]["content"]
+    if isinstance(content, list):  # Claude content blocks
+        content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
+    return content
 
 
 async def _call_openai(messages: list[dict], api_key: str, model: str) -> str:
@@ -528,9 +589,19 @@ async def check_url(url: str) -> dict[str, Any]:
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
+    # Use ONLY the cached token — never trigger a network call from a health check.
+    cached_token = (_token if (_token and time.time() < _token_expiry) else SOFIA_API_KEY) or ""
+    sofia_ok = bool(cached_token)
+    auth_method = "api_key" if SOFIA_API_KEY else ("meezeh" if (MEEZEH_USER and MEEZEH_PASS) else "none")
     return {
         "ok": True,
         "pid": os.getpid(),
+        "backend": "sofia" if sofia_ok else "fallback",
+        "meezehConfigured": bool(MEEZEH_USER and MEEZEH_PASS),
+        "sofiaKeyConfigured": bool(SOFIA_API_KEY),
+        "tokenCached": sofia_ok,
+        "authMethod": auth_method,
+        "model": SOFIA_MODEL if sofia_ok else OPENAI_CHAT_MODEL,
         "openaiEnvConfigured": bool(OPENAI_KEY),
         "anthropicEnvConfigured": bool(ANTHROPIC_KEY),
         "openaiModel": OPENAI_CHAT_MODEL,
@@ -543,14 +614,24 @@ async def extract(req: ExtractRequest) -> dict[str, Any]:
     if not req.filename or not req.text:
         raise HTTPException(400, "filename and text are required")
 
-    if req.provider == "openai":
+    token = get_sofia_token()
+    use_sofia = bool(token)
+
+    if use_sofia:
+        label = "sofia"
+        model = SOFIA_MODEL
+
+        async def call_llm(msgs: list[dict]) -> str:
+            return await _call_sofia(msgs, token)
+    elif req.provider == "openai":
         api_key = req.apiKey.strip() or OPENAI_KEY
         model = OPENAI_CHAT_MODEL
         label = "openai"
         if not api_key:
             raise HTTPException(
                 503,
-                "No OpenAI API key. Add your key in Settings (ChatGPT) or set OPENAI_API_KEY on the server.",
+                "No extraction backend available. Set SOFIA_API_KEY or MEEZEH_USERNAME/PASSWORD "
+                "for Sofia, or add an OpenAI key in Settings / OPENAI_API_KEY.",
             )
 
         async def call_llm(msgs: list[dict]) -> str:
@@ -562,7 +643,8 @@ async def extract(req: ExtractRequest) -> dict[str, Any]:
         if not api_key:
             raise HTTPException(
                 503,
-                "No Anthropic API key. Add your key in Settings (Claude) or set ANTHROPIC_API_KEY on the server.",
+                "No extraction backend available. Set SOFIA_API_KEY or MEEZEH_USERNAME/PASSWORD "
+                "for Sofia, or add a Claude key in Settings / ANTHROPIC_API_KEY.",
             )
 
         async def call_llm(msgs: list[dict]) -> str:
@@ -586,6 +668,10 @@ async def extract(req: ExtractRequest) -> dict[str, Any]:
             status = exc.response.status_code
             body = exc.response.text[:400]
             log.error("LLM API error %d: %s", status, body)
+            # Sofia 401 → token expired; force refresh on next call
+            if status == 401 and use_sofia:
+                global _token, _token_expiry
+                _token, _token_expiry = "", 0.0
             if status == 429:
                 raise HTTPException(429, f"{label} rate limit / quota exceeded. {body}")
             if status == 401:
@@ -608,10 +694,19 @@ async def extract(req: ExtractRequest) -> dict[str, Any]:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    meezeh_ok = bool(MEEZEH_USER and MEEZEH_PASS)
+    sofia_key_ok = bool(SOFIA_API_KEY)
     log.info("\nEquityLens extraction server  http://localhost:%d", PORT)
+    if sofia_key_ok:
+        log.info("  Backend  : Sofia (%s) via SOFIA_API_KEY", SOFIA_BASE)
+        log.info("  Model    : %s", SOFIA_MODEL)
+    elif meezeh_ok:
+        log.info("  Backend  : Sofia (%s) via Meezeh", SOFIA_BASE)
+        log.info("  Meezeh   : %s", MEEZEH_USER)
+        log.info("  Model    : %s", SOFIA_MODEL)
+    else:
+        log.info("  Backend  : OpenAI/Anthropic fallback (no Sofia auth configured)")
     log.info("  OpenAI env key     : %s", "yes" if OPENAI_KEY else "no")
     log.info("  Anthropic env key  : %s", "yes" if ANTHROPIC_KEY else "no")
-    log.info("  OpenAI model       : %s", OPENAI_CHAT_MODEL)
-    log.info("  Anthropic model    : %s", ANTHROPIC_CHAT_MODEL)
     log.info("")
     uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=False, app_dir=str(Path(__file__).parent))
