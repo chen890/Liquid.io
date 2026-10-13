@@ -6,39 +6,52 @@ import {
   migrateLegacyExtractionKey,
   EXTRACTION_KEY_OPENAI,
   EXTRACTION_KEY_ANTHROPIC,
+  EXTRACTION_KEY_GROK,
   isValidOpenAIExtractionKey,
   isValidAnthropicExtractionKey,
+  isValidGrokExtractionKey,
+  providerDisplayName,
 } from '../../lib/extractionKeys';
 import { checkServerHealth } from '../../lib/ai/extractor';
 import type { ServerHealth } from '../../lib/ai/extractor';
 import { Button } from '../ui/Button';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 
+type Props = {
+  /** Fired after any key is saved (or cleared) so parents can re-check readiness. */
+  onKeysChanged?: () => void | Promise<void>;
+};
+
 /**
- * Secure vault: pick which agent runs extractions, then configure each vendor's API key separately.
+ * Pick which agent runs extractions, then configure each vendor's API key separately (IndexedDB).
  */
-export function GrantExtractionSections() {
+export function GrantExtractionSections({ onKeysChanged }: Props) {
   const [activeAgent, setActiveAgent] = useState<ExtractionProvider>('openai');
   const [openaiKey, setOpenaiKey] = useState('');
   const [anthropicKey, setAnthropicKey] = useState('');
+  const [grokKey, setGrokKey] = useState('');
   const [showOpenai, setShowOpenai] = useState(false);
   const [showAnthropic, setShowAnthropic] = useState(false);
+  const [showGrok, setShowGrok] = useState(false);
   const [agentSaved, setAgentSaved] = useState(false);
   const [openaiSaved, setOpenaiSaved] = useState(false);
   const [anthropicSaved, setAnthropicSaved] = useState(false);
+  const [grokSaved, setGrokSaved] = useState(false);
   const [serverHealth, setServerHealth] = useState<ServerHealth | null>(null);
 
   useEffect(() => {
     void (async () => {
       await migrateLegacyExtractionKey();
-      const [p, o, a] = await Promise.all([
+      const [p, o, a, g] = await Promise.all([
         getSetting<ExtractionProvider>('extractionProvider'),
         getSetting<string>(EXTRACTION_KEY_OPENAI),
         getSetting<string>(EXTRACTION_KEY_ANTHROPIC),
+        getSetting<string>(EXTRACTION_KEY_GROK),
       ]);
       setActiveAgent(p ?? 'openai');
       setOpenaiKey(o ?? '');
       setAnthropicKey(a ?? '');
+      setGrokKey(g ?? '');
       checkServerHealth().then(setServerHealth);
     })();
   }, []);
@@ -55,16 +68,33 @@ export function GrantExtractionSections() {
     await saveSetting(EXTRACTION_KEY_OPENAI, openaiKey.trim());
     setOpenaiSaved(true);
     setTimeout(() => setOpenaiSaved(false), 2000);
+    await onKeysChanged?.();
   }
 
   async function handleSaveAnthropic() {
     await saveSetting(EXTRACTION_KEY_ANTHROPIC, anthropicKey.trim());
     setAnthropicSaved(true);
     setTimeout(() => setAnthropicSaved(false), 2000);
+    await onKeysChanged?.();
+  }
+
+  async function handleSaveGrok() {
+    await saveSetting(EXTRACTION_KEY_GROK, grokKey.trim());
+    setGrokSaved(true);
+    setTimeout(() => setGrokSaved(false), 2000);
+    await onKeysChanged?.();
   }
 
   const openaiTrim = openaiKey.trim();
   const anthropicTrim = anthropicKey.trim();
+  const grokTrim = grokKey.trim();
+  const hasAnyKey = Boolean(openaiTrim || anthropicTrim || grokTrim);
+
+  const agents: { id: ExtractionProvider; subtitle: string }[] = [
+    { id: 'openai', subtitle: `Model · ${serverHealth?.openaiModel ?? 'gpt-4o'}` },
+    { id: 'anthropic', subtitle: `Model · ${serverHealth?.anthropicModel ?? 'claude-sonnet-4'}` },
+    { id: 'grok', subtitle: `Model · ${serverHealth?.grokModel ?? 'grok-3-latest'}` },
+  ];
 
   return (
     <>
@@ -75,32 +105,25 @@ export function GrantExtractionSections() {
         </CardHeader>
         <div className="space-y-4">
           <p className="text-xs text-slate-500">
-            Uploads and E*TRADE sync use <strong className="text-slate-400">one</strong> backend at a time. Keys for both vendors are stored separately below—switching agent does not overwrite the other key.
+            Uploads use <strong className="text-slate-400">one</strong> backend at a time. Save at least one API key
+            below — keys are stored separately in this browser and are required to use the app.
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => void handleAgentChange('openai')}
-              className={`rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
-                activeAgent === 'openai'
-                  ? 'border-indigo-500 bg-indigo-950/40 text-white'
-                  : 'border-slate-700 bg-slate-900/50 text-slate-400 hover:border-slate-600'
-              }`}>
-              <div className="font-medium">Use ChatGPT (OpenAI)</div>
-              <div className="text-[11px] text-slate-500 mt-0.5">Model · {serverHealth?.openaiModel ?? 'gpt-4o'}</div>
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleAgentChange('anthropic')}
-              className={`rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
-                activeAgent === 'anthropic'
-                  ? 'border-indigo-500 bg-indigo-950/40 text-white'
-                  : 'border-slate-700 bg-slate-900/50 text-slate-400 hover:border-slate-600'
-              }`}>
-              <div className="font-medium">Use Claude (Anthropic)</div>
-              <div className="text-[11px] text-slate-500 mt-0.5">Model · {serverHealth?.anthropicModel ?? 'claude-sonnet-4'}</div>
-            </button>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {agents.map((agent) => (
+              <button
+                key={agent.id}
+                type="button"
+                onClick={() => void handleAgentChange(agent.id)}
+                className={`rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+                  activeAgent === agent.id
+                    ? 'border-indigo-500 bg-indigo-950/40 text-white'
+                    : 'border-slate-700 bg-slate-900/50 text-slate-400 hover:border-slate-600'
+                }`}>
+                <div className="font-medium">Use {providerDisplayName(agent.id)}</div>
+                <div className="text-[11px] text-slate-500 mt-0.5">{agent.subtitle}</div>
+              </button>
+            ))}
           </div>
 
           {serverHealth?.online && (
@@ -113,6 +136,15 @@ export function GrantExtractionSections() {
               {serverHealth.anthropicEnvConfigured && (
                 <span className="text-slate-500">· ANTHROPIC_API_KEY in .env</span>
               )}
+              {serverHealth.grokEnvConfigured && (
+                <span className="text-slate-500">· GROK_API_KEY in .env</span>
+              )}
+            </p>
+          )}
+
+          {!hasAnyKey && (
+            <p className="text-xs text-amber-400">
+              Save at least one valid API key (OpenAI, Anthropic, or Grok) to unlock the app.
             </p>
           )}
 
@@ -124,7 +156,7 @@ export function GrantExtractionSections() {
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card padding="md">
           <CardHeader>
             <CardTitle>OpenAI (ChatGPT)</CardTitle>
@@ -132,7 +164,7 @@ export function GrantExtractionSections() {
           </CardHeader>
           <div className="space-y-4">
             <p className="text-xs text-slate-500">
-              Used when <strong className="text-slate-400">ChatGPT</strong> is the active agent, or for direct browser calls to OpenAI. Stored in IndexedDB.
+              Used when <strong className="text-slate-400">ChatGPT</strong> is the active agent. Stored in IndexedDB.
             </p>
             <div>
               <label className="text-xs text-slate-500 block mb-1.5">OpenAI API key</label>
@@ -190,7 +222,7 @@ export function GrantExtractionSections() {
           </CardHeader>
           <div className="space-y-4">
             <p className="text-xs text-slate-500">
-              Used when <strong className="text-slate-400">Claude</strong> is the active agent. Stored in IndexedDB. Browser extraction still needs the local API server (CORS).
+              Used when <strong className="text-slate-400">Claude</strong> is the active agent. Needs the local API server (CORS).
             </p>
             <div>
               <label className="text-xs text-slate-500 block mb-1.5">Anthropic API key</label>
@@ -217,7 +249,7 @@ export function GrantExtractionSections() {
             </div>
             {anthropicTrim && !isValidAnthropicExtractionKey(anthropicKey) && (
               <p className="text-xs text-amber-400">
-                Anthropic keys look like <code className="font-mono">sk-ant-…</code> (not plain <code className="font-mono">sk-…</code>).
+                Anthropic keys look like <code className="font-mono">sk-ant-…</code>.
               </p>
             )}
             <Button
@@ -236,6 +268,64 @@ export function GrantExtractionSections() {
             <div className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-slate-500">
               <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">
                 console.anthropic.com/settings/keys
+              </a>
+            </div>
+          </div>
+        </Card>
+
+        <Card padding="md">
+          <CardHeader>
+            <CardTitle>xAI (Grok)</CardTitle>
+            <Key className="w-4 h-4 text-slate-600" />
+          </CardHeader>
+          <div className="space-y-4">
+            <p className="text-xs text-slate-500">
+              Used when <strong className="text-slate-400">Grok</strong> is the active agent. Stored in IndexedDB.
+            </p>
+            <div>
+              <label className="text-xs text-slate-500 block mb-1.5">Grok API key</label>
+              <div className="flex gap-2">
+                <input
+                  type={showGrok ? 'text' : 'password'}
+                  value={grokKey}
+                  onChange={(e) => {
+                    setGrokKey(e.target.value);
+                    setGrokSaved(false);
+                  }}
+                  placeholder="xai-…"
+                  autoComplete="off"
+                  className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowGrok((v) => !v)}
+                  className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-400 hover:text-white transition-colors"
+                >
+                  {showGrok ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+            {grokTrim && !isValidGrokExtractionKey(grokKey) && (
+              <p className="text-xs text-amber-400">
+                Grok keys look like <code className="font-mono">xai-…</code>.
+              </p>
+            )}
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => void handleSaveGrok()}
+              disabled={!grokTrim || !isValidGrokExtractionKey(grokKey)}>
+              {grokSaved ? (
+                <>
+                  <Check className="w-3.5 h-3.5" /> Grok key saved
+                </>
+              ) : (
+                'Save Grok key'
+              )}
+            </Button>
+            <div className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-slate-500">
+              <a href="https://console.x.ai/" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">
+                console.x.ai
               </a>
             </div>
           </div>

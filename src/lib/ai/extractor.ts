@@ -1,7 +1,7 @@
 import type { GrantRecord, ExtractedField, GrantType, VestingFrequency, ExtractionProvider } from '../../types';
 import { v4 as uuidv4 } from 'uuid';
 import { getSetting } from '../storage';
-import { getExtractionKeyForProvider } from '../extractionKeys';
+import { getExtractionKeyForProvider, providerDisplayName } from '../extractionKeys';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Raw types returned by the AI (OpenAI + Anthropic use the same schema)
@@ -176,8 +176,10 @@ export interface ServerHealth {
   online: boolean;
   openaiEnvConfigured: boolean;
   anthropicEnvConfigured: boolean;
+  grokEnvConfigured: boolean;
   openaiModel?: string;
   anthropicModel?: string;
+  grokModel?: string;
 }
 
 export async function checkServerHealth(): Promise<ServerHealth> {
@@ -188,31 +190,38 @@ export async function checkServerHealth(): Promise<ServerHealth> {
         online: false,
         openaiEnvConfigured: false,
         anthropicEnvConfigured: false,
+        grokEnvConfigured: false,
       };
     }
     const d = await r.json() as {
       openaiEnvConfigured?: boolean;
       anthropicEnvConfigured?: boolean;
+      grokEnvConfigured?: boolean;
       openaiModel?: string;
       anthropicModel?: string;
+      grokModel?: string;
     };
     return {
       online: true,
       openaiEnvConfigured: d.openaiEnvConfigured ?? false,
       anthropicEnvConfigured: d.anthropicEnvConfigured ?? false,
+      grokEnvConfigured: d.grokEnvConfigured ?? false,
       openaiModel: d.openaiModel,
       anthropicModel: d.anthropicModel,
+      grokModel: d.grokModel,
     };
   } catch {
     return {
       online: false,
       openaiEnvConfigured: false,
       anthropicEnvConfigured: false,
+      grokEnvConfigured: false,
     };
   }
 }
 
 const OPENAI_MODEL = 'gpt-4o';
+const GROK_MODEL = 'grok-3-latest';
 
 export async function extractGrantsFromText(
   text: string,
@@ -226,7 +235,14 @@ export async function extractGrantsFromText(
 
   const provider: ExtractionProvider =
     providerArg ?? (await getSetting<ExtractionProvider>('extractionProvider')) ?? 'openai';
-  const human = provider === 'openai' ? 'ChatGPT (OpenAI)' : 'Claude (Anthropic)';
+  const human = providerDisplayName(provider);
+
+  const key = apiKey.trim() || (await getExtractionKeyForProvider(provider)) || '';
+  if (!key) {
+    throw new Error(
+      `No API key saved for ${human}. Add it under Secure vault (or the setup screen), then try again.`,
+    );
+  }
 
   const health = await checkServerHealth();
 
@@ -238,7 +254,7 @@ export async function extractGrantsFromText(
       const res = await fetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: label, text: chunks[i], apiKey, provider }),
+        body: JSON.stringify({ filename: label, text: chunks[i], apiKey: key, provider }),
       });
 
       if (!res.ok) {
@@ -260,31 +276,30 @@ export async function extractGrantsFromText(
     return allGrants;
   }
 
-  const key = apiKey.trim() || (await getExtractionKeyForProvider(provider)) || '';
-  if (!key) {
-    throw new Error(
-      'No API key in Secure vault. Add your key for the selected provider under Secure vault, or run npm start so the extraction server can use .env keys.',
-    );
-  }
-
   if (provider === 'anthropic') {
     throw new Error(
       'Claude extraction needs the local API server (Anthropic blocks browser calls). Run: npm start',
     );
   }
 
+  const endpoint =
+    provider === 'grok'
+      ? 'https://api.x.ai/v1/chat/completions'
+      : 'https://api.openai.com/v1/chat/completions';
+  const model = provider === 'grok' ? GROK_MODEL : OPENAI_MODEL;
+
   for (let i = 0; i < chunks.length; i++) {
     const label = chunks.length > 1 ? `${filename} (part ${i + 1}/${chunks.length})` : filename;
-    onProgress?.(`Analyzing ${label} via OpenAI (direct)…`);
+    onProgress?.(`Analyzing ${label} via ${human} (direct)…`);
 
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
-        model: OPENAI_MODEL,
+        model,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: `File: ${label}\n\n${chunks[i]}` },
@@ -296,7 +311,7 @@ export async function extractGrantsFromText(
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
-      throw new Error(err.error?.message ?? `OpenAI error ${res.status}`);
+      throw new Error(err.error?.message ?? `${human} error ${res.status}`);
     }
 
     const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };

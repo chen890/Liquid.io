@@ -1,4 +1,4 @@
-export type ExtractionProvider = 'openai' | 'anthropic';
+export type ExtractionProvider = 'openai' | 'anthropic' | 'grok';
 
 export type GrantType = 'RSU' | 'ISO' | 'NSO' | 'ESPP' | 'RestrictedShares' | 'PerformanceShares';
 export type VestingFrequency = 'Monthly' | 'Quarterly' | 'Annual' | 'Custom';

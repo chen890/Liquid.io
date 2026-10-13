@@ -114,7 +114,7 @@ export function VaultView() {
           Secure vault
         </h1>
         <p className="text-sm text-slate-500 mt-1">
-          Encrypted secrets and files, scoped to your account. Grant extraction: pick an active agent, then save <strong className="text-slate-400">separate</strong> OpenAI and Anthropic keys (IndexedDB). Server vault secrets are below.
+          Encrypted secrets and files, scoped to your account. Grant extraction: pick an active agent, then save at least one of OpenAI, Anthropic, or Grok keys (IndexedDB). Server vault secrets are below.
         </p>
       </div>
 

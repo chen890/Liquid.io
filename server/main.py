@@ -15,7 +15,7 @@ Auth flow (Sofia preferred, restored from ca2f93d)
 5. Parse JSON response → return grants list
 
 Fallback: if Sofia/Meezeh is not configured, use the user-selected provider
-(`openai` or `anthropic`) with keys from Settings and/or `.env`.
+(`openai`, `anthropic`, or `grok`) with keys from the app and/or `.env`.
 """
 
 from __future__ import annotations
@@ -54,8 +54,10 @@ MEEZEH_PASS = os.getenv("MEEZEH_PASSWORD", "")
 SOFIA_API_KEY = os.getenv("SOFIA_API_KEY", "")  # pre-obtained token, skips Meezeh auth
 OPENAI_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+GROK_KEY = (os.getenv("GROK_API_KEY", "") or os.getenv("XAI_API_KEY", "")).strip()
 OPENAI_CHAT_MODEL = os.getenv("OPENAI_EXTRACTION_MODEL", "gpt-4o").strip()
 ANTHROPIC_CHAT_MODEL = os.getenv("ANTHROPIC_EXTRACTION_MODEL", "claude-sonnet-4-20250514").strip()
+GROK_CHAT_MODEL = os.getenv("GROK_EXTRACTION_MODEL", "grok-3-latest").strip()
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 log = logging.getLogger("equitylens")
@@ -221,6 +223,23 @@ async def _call_anthropic(messages: list[dict], api_key: str, model: str) -> str
     return "".join(out)
 
 
+async def _call_grok(messages: list[dict], api_key: str, model: str) -> str:
+    """xAI Grok — OpenAI-compatible chat completions."""
+    async with httpx.AsyncClient(timeout=120) as client:
+        r = await client.post(
+            "https://api.x.ai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": model,
+                "messages": messages,
+                "temperature": 0,
+            },
+        )
+        r.raise_for_status()
+        data = r.json()
+    return data["choices"][0]["message"]["content"]
+
+
 def _chunk(text: str, max_chars: int = 12_000) -> list[str]:
     if len(text) <= max_chars:
         return [text]
@@ -270,7 +289,7 @@ class ExtractRequest(BaseModel):
     filename: str
     text: str
     apiKey: str = ""
-    provider: Literal["openai", "anthropic"] = "openai"
+    provider: Literal["openai", "anthropic", "grok"] = "openai"
 
 
 @app.get("/api/price/{ticker}")
@@ -604,8 +623,10 @@ def health() -> dict[str, Any]:
         "model": SOFIA_MODEL if sofia_ok else OPENAI_CHAT_MODEL,
         "openaiEnvConfigured": bool(OPENAI_KEY),
         "anthropicEnvConfigured": bool(ANTHROPIC_KEY),
+        "grokEnvConfigured": bool(GROK_KEY),
         "openaiModel": OPENAI_CHAT_MODEL,
         "anthropicModel": ANTHROPIC_CHAT_MODEL,
+        "grokModel": GROK_CHAT_MODEL,
     }
 
 
@@ -630,12 +651,23 @@ async def extract(req: ExtractRequest) -> dict[str, Any]:
         if not api_key:
             raise HTTPException(
                 503,
-                "No extraction backend available. Set SOFIA_API_KEY or MEEZEH_USERNAME/PASSWORD "
-                "for Sofia, or add an OpenAI key in Settings / OPENAI_API_KEY.",
+                "No OpenAI API key. Save one in the app (Secure vault) or set OPENAI_API_KEY on the server.",
             )
 
         async def call_llm(msgs: list[dict]) -> str:
             return await _call_openai(msgs, api_key, model)
+    elif req.provider == "grok":
+        api_key = req.apiKey.strip() or GROK_KEY
+        model = GROK_CHAT_MODEL
+        label = "grok"
+        if not api_key:
+            raise HTTPException(
+                503,
+                "No Grok API key. Save one in the app (Secure vault) or set GROK_API_KEY / XAI_API_KEY on the server.",
+            )
+
+        async def call_llm(msgs: list[dict]) -> str:
+            return await _call_grok(msgs, api_key, model)
     else:
         api_key = req.apiKey.strip() or ANTHROPIC_KEY
         model = ANTHROPIC_CHAT_MODEL
@@ -643,8 +675,7 @@ async def extract(req: ExtractRequest) -> dict[str, Any]:
         if not api_key:
             raise HTTPException(
                 503,
-                "No extraction backend available. Set SOFIA_API_KEY or MEEZEH_USERNAME/PASSWORD "
-                "for Sofia, or add a Claude key in Settings / ANTHROPIC_API_KEY.",
+                "No Anthropic API key. Save one in the app (Secure vault) or set ANTHROPIC_API_KEY on the server.",
             )
 
         async def call_llm(msgs: list[dict]) -> str:
@@ -705,8 +736,9 @@ if __name__ == "__main__":
         log.info("  Meezeh   : %s", MEEZEH_USER)
         log.info("  Model    : %s", SOFIA_MODEL)
     else:
-        log.info("  Backend  : OpenAI/Anthropic fallback (no Sofia auth configured)")
+        log.info("  Backend  : OpenAI/Anthropic/Grok fallback (no Sofia auth configured)")
     log.info("  OpenAI env key     : %s", "yes" if OPENAI_KEY else "no")
     log.info("  Anthropic env key  : %s", "yes" if ANTHROPIC_KEY else "no")
+    log.info("  Grok env key       : %s", "yes" if GROK_KEY else "no")
     log.info("")
     uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=False, app_dir=str(Path(__file__).parent))

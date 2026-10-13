@@ -9,7 +9,14 @@ import { extractGrantsFromText, checkServerHealth } from '../../lib/ai/extractor
 import type { ServerHealth } from '../../lib/ai/extractor';
 import { reconcileGrants } from '../../lib/ai/reconciler';
 import { getSetting } from '../../lib/storage';
-import { migrateLegacyExtractionKey, getExtractionKeyForProvider, EXTRACTION_KEY_OPENAI, EXTRACTION_KEY_ANTHROPIC } from '../../lib/extractionKeys';
+import {
+  migrateLegacyExtractionKey,
+  getExtractionKeyForProvider,
+  EXTRACTION_KEY_OPENAI,
+  EXTRACTION_KEY_ANTHROPIC,
+  EXTRACTION_KEY_GROK,
+  providerDisplayName,
+} from '../../lib/extractionKeys';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 
@@ -42,6 +49,7 @@ export function UploadView() {
   const [isDragging, setIsDragging] = useState(false);
   const [openaiKey, setOpenaiKey] = useState('');
   const [anthropicKey, setAnthropicKey] = useState('');
+  const [grokKey, setGrokKey] = useState('');
   const [extractionProvider, setExtractionProvider] = useState<ExtractionProvider>('openai');
   const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
   const [serverHealth, setServerHealth] = useState<ServerHealth | null>(null);
@@ -50,13 +58,15 @@ export function UploadView() {
   useEffect(() => {
     void (async () => {
       await migrateLegacyExtractionKey();
-      const [o, a, p] = await Promise.all([
+      const [o, a, g, p] = await Promise.all([
         getSetting<string>(EXTRACTION_KEY_OPENAI),
         getSetting<string>(EXTRACTION_KEY_ANTHROPIC),
+        getSetting<string>(EXTRACTION_KEY_GROK),
         getSetting<ExtractionProvider>('extractionProvider'),
       ]);
       setOpenaiKey(o ?? '');
       setAnthropicKey(a ?? '');
+      setGrokKey(g ?? '');
       setExtractionProvider(p ?? 'openai');
       checkServerHealth().then(setServerHealth);
     })();
@@ -100,13 +110,11 @@ export function UploadView() {
     const key = await getExtractionKeyForProvider(provider);
     setOpenaiKey((await getSetting<string>(EXTRACTION_KEY_OPENAI)) ?? '');
     setAnthropicKey((await getSetting<string>(EXTRACTION_KEY_ANTHROPIC)) ?? '');
+    setGrokKey((await getSetting<string>(EXTRACTION_KEY_GROK)) ?? '');
     setExtractionProvider(provider);
 
-    const envFallback =
-      provider === 'openai'
-        ? serverHealth?.online && serverHealth.openaiEnvConfigured
-        : serverHealth?.online && serverHealth.anthropicEnvConfigured;
-    if (!key.trim() && !envFallback) return;
+    // App-saved key required (server .env alone is not enough).
+    if (!key.trim()) return;
 
     setProcessing(true);
     clearProcessingLog();
@@ -201,11 +209,13 @@ export function UploadView() {
   };
 
   const ext = (f: File) => f.name.split('.').pop()?.toLowerCase() ?? '';
-  const openaiReady =
-    openaiKey.trim().length > 0 || !!(serverHealth?.online && serverHealth.openaiEnvConfigured);
-  const anthropicReady =
-    anthropicKey.trim().length > 0 || !!(serverHealth?.online && serverHealth.anthropicEnvConfigured);
-  const hasCredentials = extractionProvider === 'openai' ? openaiReady : anthropicReady;
+  const keyForProvider =
+    extractionProvider === 'openai'
+      ? openaiKey
+      : extractionProvider === 'anthropic'
+        ? anthropicKey
+        : grokKey;
+  const hasCredentials = keyForProvider.trim().length > 0;
   const anthropicNeedsServer = extractionProvider === 'anthropic' && !serverHealth?.online;
   const canProcess = hasCredentials && !anthropicNeedsServer;
 
@@ -214,7 +224,7 @@ export function UploadView() {
       <div>
         <h1 className="text-xl font-semibold text-white">Upload Documents</h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          Upload equity documents — ChatGPT or Claude extracts every grant (see Secure vault for provider and API key).
+          Upload equity documents — ChatGPT, Claude, or Grok extracts every grant (API key saved in the app).
         </p>
       </div>
 
@@ -224,25 +234,15 @@ export function UploadView() {
           <>
             <Server className="w-3.5 h-3.5 text-emerald-500" />
             <span className="text-emerald-500">Extraction server online</span>
-            {serverHealth.openaiEnvConfigured && (
-              <span className="px-2 py-0.5 rounded border border-slate-700 bg-slate-800/80 text-slate-400">
-                OPENAI_API_KEY on server
-              </span>
-            )}
-            {serverHealth.anthropicEnvConfigured && (
-              <span className="px-2 py-0.5 rounded border border-slate-700 bg-slate-800/80 text-slate-400">
-                ANTHROPIC_API_KEY on server
-              </span>
-            )}
           </>
         ) : (
           <>
             <Server className="w-3.5 h-3.5 text-slate-500" />
-            <span className="text-slate-500">Extraction server offline — OpenAI-only direct mode if you have a browser key</span>
+            <span className="text-slate-500">Extraction server offline — ChatGPT/Grok can run direct from a saved browser key</span>
           </>
         )}
         <span className="px-2 py-0.5 rounded border text-xs font-medium border-indigo-800 bg-indigo-950/40 text-indigo-300">
-          Using: {extractionProvider === 'openai' ? 'ChatGPT (OpenAI)' : 'Claude (Anthropic)'}
+          Using: {providerDisplayName(extractionProvider)}
         </span>
       </div>
 
@@ -250,17 +250,17 @@ export function UploadView() {
         <div className="flex items-start gap-3 bg-amber-950/40 border border-amber-800/60 rounded-xl px-4 py-3">
           <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
           <div className="text-sm text-amber-200">
-            Claude extraction needs the local API server. Run <code className="font-mono text-xs">npm start</code> in this repo, or switch to ChatGPT in Secure vault for browser-only OpenAI calls.
+            Claude extraction needs the local API server. Run <code className="font-mono text-xs">npm start</code> in this repo, or switch to ChatGPT/Grok in Secure vault for browser-direct calls.
           </div>
         </div>
       )}
 
-      {/* Missing key / env banner */}
+      {/* Missing key banner */}
       {!hasCredentials && (
         <div className="flex items-start gap-3 bg-amber-950/40 border border-amber-800/60 rounded-xl px-4 py-3">
           <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
           <div className="text-sm">
-            <span className="text-amber-300 font-medium">No credentials for the selected provider.</span>
+            <span className="text-amber-300 font-medium">No saved API key for {providerDisplayName(extractionProvider)}.</span>
             <span className="text-amber-500 ml-2">
               {backendHasAuth ? (
                 <>
@@ -271,15 +271,10 @@ export function UploadView() {
                   >
                     Secure vault
                   </button>
-                  {' '}to set provider and API key, or configure{' '}
-                  <code className="font-mono text-xs">OPENAI_API_KEY</code> /{' '}
-                  <code className="font-mono text-xs">ANTHROPIC_API_KEY</code> in the server <code className="font-mono text-xs">.env</code>.
+                  {' '}to save a key for the active agent.
                 </>
               ) : (
-                <>
-                  Sign in and open <span className="text-amber-300">Secure vault</span> for provider and key, or set{' '}
-                  <code className="font-mono text-xs">OPENAI_API_KEY</code> / <code className="font-mono text-xs">ANTHROPIC_API_KEY</code> in the server <code className="font-mono text-xs">.env</code>.
-                </>
+                <>Save a key for the active agent (setup screen or Settings).</>
               )}
             </span>
           </div>

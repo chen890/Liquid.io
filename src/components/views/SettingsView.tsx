@@ -10,6 +10,8 @@ import { getSetting } from '../../lib/storage';
 import { getExtractionKeyForProvider, migrateLegacyExtractionKey } from '../../lib/extractionKeys';
 import { checkServerHealth } from '../../lib/ai/extractor';
 import type { ServerHealth } from '../../lib/ai/extractor';
+import { GrantExtractionSections } from '../vault/GrantExtractionSections';
+import { useAuthStore } from '../../store/authStore';
 
 type OAuthStep = 'idle' | 'started' | 'verifying' | 'connected' | 'error';
 
@@ -217,6 +219,7 @@ function ETRADECard() {
 
 export function SettingsView() {
   const { clearAllData, portfolio } = usePortfolioStore();
+  const backendHasAuth = useAuthStore((s) => s.backendHasAuth);
   const [confirmClear, setConfirmClear] = useState(false);
   const [serverHealth, setServerHealth] = useState<ServerHealth | null>(null);
 
@@ -235,7 +238,7 @@ export function SettingsView() {
   };
 
   return (
-    <div className="mx-auto min-h-0 w-full max-w-2xl space-y-6 px-4 py-4 sm:p-6">
+    <div className="mx-auto min-h-0 w-full max-w-4xl space-y-6 px-4 py-4 sm:p-6">
       <div>
         <h1 className="text-xl font-semibold text-white">Settings</h1>
         <p className="text-sm text-slate-500 mt-0.5">Manage your EquityLens preferences and data.</p>
@@ -261,6 +264,19 @@ export function SettingsView() {
           </div>
         </div>
       </Card>
+
+      {/* API keys — always available here when Secure vault nav is hidden */}
+      {!backendHasAuth && (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-sm font-medium text-slate-300">Grant extraction API keys</h2>
+            <p className="text-xs text-slate-500 mt-1">
+              At least one saved key is required. Keys stay in this browser (IndexedDB).
+            </p>
+          </div>
+          <GrantExtractionSections />
+        </div>
+      )}
 
       {/* E*TRADE Integration */}
       <ETRADECard />
@@ -307,7 +323,14 @@ export function SettingsView() {
                   Anthropic: {serverHealth.anthropicEnvConfigured ? 'server key configured' : 'no server key'} · model{' '}
                   <span className="text-slate-400 font-mono">{serverHealth.anthropicModel ?? '—'}</span>
                 </li>
+                <li>
+                  Grok: {serverHealth.grokEnvConfigured ? 'server key configured' : 'no server key'} · model{' '}
+                  <span className="text-slate-400 font-mono">{serverHealth.grokModel ?? '—'}</span>
+                </li>
               </ul>
+              <p className="text-slate-600 ml-4">
+                App use still requires at least one key saved in IndexedDB (Secure vault / setup screen).
+              </p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -319,8 +342,8 @@ export function SettingsView() {
                 npm start
               </div>
               <p className="text-slate-600">
-                Start the server for Claude extraction and for using <code className="font-mono text-[11px]">.env</code> API keys.
-                Without it, ChatGPT can still run from the browser if you saved an OpenAI key in Settings.
+                Start the server for Claude extraction. Without it, ChatGPT or Grok can still run from the browser
+                if you saved a key in the app.
               </p>
             </div>
           )}
@@ -342,7 +365,10 @@ export function SettingsView() {
           <p><span className="text-slate-400">EquityLens</span> — Document Intelligence & Equity Portfolio Dashboard</p>
           <p>Local-first · All data stored in browser IndexedDB</p>
           <p>Supported files: PDF, DOCX, XLSX, CSV, XML, HTML, TXT</p>
-          <p>Grant extraction (provider + API key): configure under <span className="text-slate-400">Secure vault</span></p>
+          <p>
+            Grant extraction: save at least one OpenAI, Anthropic, or Grok key under{' '}
+            <span className="text-slate-400">{backendHasAuth ? 'Secure vault' : 'Settings'}</span>
+          </p>
         </div>
       </Card>
     </div>

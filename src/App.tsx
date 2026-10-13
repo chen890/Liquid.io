@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Navigate, Route, Routes, Link } from 'react-router-dom';
 import { SignInPage, SignInBackendMissing } from './components/auth/SignInPage';
+import { ApiKeySetupGate } from './components/auth/ApiKeySetupGate';
 import { Sidebar } from './components/layout/Sidebar';
 import { MainHeader } from './components/layout/MainHeader';
 import { ScrollToTopFab } from './components/layout/ScrollToTopFab';
@@ -20,6 +21,7 @@ import { VaultView } from './components/views/VaultView';
 import { useAuthStore } from './store/authStore';
 import { usePortfolioStore } from './store/portfolioStore';
 import { useThemeStore } from './store/themeStore';
+import { hasAnySavedExtractionKey } from './lib/extractionKeys';
 
 function ViewRouter() {
   const { currentView } = usePortfolioStore();
@@ -47,12 +49,17 @@ function ViewRouter() {
 function MainLayout() {
   const mainScrollRef = useRef<HTMLDivElement>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [keysReady, setKeysReady] = useState<boolean | null>(null);
   const { loadPortfolio, isLoading } = usePortfolioStore();
   const currentView = usePortfolioStore((s) => s.currentView);
   const { user, backendHasAuth } = useAuthStore();
   const day = useThemeStore((s) => s.appearance) === 'day';
 
   const closeMobileNav = () => setMobileNavOpen(false);
+
+  useEffect(() => {
+    void hasAnySavedExtractionKey().then(setKeysReady);
+  }, [user, currentView]);
 
   useEffect(() => {
     if (user || !backendHasAuth) void loadPortfolio();
@@ -76,6 +83,18 @@ function MainLayout() {
       document.body.style.overflow = '';
     };
   }, [mobileNavOpen]);
+
+  if (keysReady === null) {
+    return (
+      <div className={`flex min-h-screen items-center justify-center ${day ? 'bg-slate-100' : 'bg-slate-950'}`}>
+        <div className="w-8 h-8 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!keysReady) {
+    return <ApiKeySetupGate onReady={() => setKeysReady(true)} />;
+  }
 
   if (isLoading) {
     return (
