@@ -20,7 +20,8 @@ import {
 } from 'recharts';
 import { Calculator, AlertTriangle, Info, TrendingUp, ArrowUpDown, Zap, RefreshCw } from 'lucide-react';
 import { getAllVestingEvents } from '../../lib/vestingSchedule';
-import { usePortfolioStore } from '../../store/portfolioStore';
+import { usePortfolioStore, useWorkingGrants } from '../../store/portfolioStore';
+import { resolveVestingCounts } from '../../lib/vestingCounts';
 import type { GrantRecord } from '../../types';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
@@ -104,12 +105,7 @@ interface GrantScenario {
 
 function buildScenarios(grants: GrantRecord[]): GrantScenario[] {
   return grants.flatMap((g) => {
-    const total   = g.totalShares?.value ?? 0;
-    const unvest  = g.unvestedShares?.value;
-    const vested  = g.vestedShares?.value;
-    const vestedCount = vested !== undefined ? vested
-      : (unvest !== undefined && total > 0 ? Math.max(0, total - unvest) : 0);
-    const unvestedCount = unvest ?? Math.max(0, total - vestedCount);
+    const { total, vested: vestedCount, unvested: unvestedCount } = resolveVestingCounts(g);
 
     const costBasis = g.fairMarketValue?.value ??
       (g.currentMarketValue?.value && total ? g.currentMarketValue.value / total : 0);
@@ -154,8 +150,8 @@ function fmtUSD(n: number) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export function WhatIfView() {
-  const { portfolio, setView } = usePortfolioStore();
-  const grants = portfolio.grants;
+  const { setView } = usePortfolioStore();
+  const grants = useWorkingGrants();
 
   const [customPrice, setCustomPrice] = useState('');
   const [taxRegime, setTaxRegime] = useState<TaxRegime>('israel');

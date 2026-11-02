@@ -10,7 +10,7 @@
 import { useState, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Plus, Trash2, TrendingDown } from 'lucide-react';
-import { usePortfolioStore } from '../../store/portfolioStore';
+import { usePortfolioStore, useWorkingGrants } from '../../store/portfolioStore';
 import type { SaleTransaction } from '../../types';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
@@ -28,7 +28,8 @@ function thisYear() { return new Date().getFullYear(); }
 
 export function TransactionsView() {
   const { portfolio, addTransaction, deleteTransaction } = usePortfolioStore();
-  const { transactions, grants } = portfolio;
+  const { transactions } = portfolio;
+  const grants = useWorkingGrants();
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({

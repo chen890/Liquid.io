@@ -269,9 +269,9 @@ export function SettingsView() {
       {!backendHasAuth && (
         <div className="space-y-6">
           <div>
-            <h2 className="text-sm font-medium text-slate-300">Grant extraction API keys</h2>
+            <h2 className="text-sm font-medium text-slate-300">Grant extraction</h2>
             <p className="text-xs text-slate-500 mt-1">
-              At least one saved key is required. Keys stay in this browser (IndexedDB).
+              Local development uses Sofia when available; otherwise save a vendor key in this browser.
             </p>
           </div>
           <GrantExtractionSections />
@@ -315,6 +315,12 @@ export function SettingsView() {
                 <span className="text-slate-300 font-medium">Local extraction server online</span>
               </div>
               <ul className="text-slate-500 ml-4 list-disc space-y-0.5">
+                {serverHealth.backend === 'sofia' && (
+                  <li>
+                    Sofia (local preferred) · model{' '}
+                    <span className="text-slate-400 font-mono">{serverHealth.model ?? '—'}</span>
+                  </li>
+                )}
                 <li>
                   OpenAI: {serverHealth.openaiEnvConfigured ? 'server key configured' : 'no server key'} · model{' '}
                   <span className="text-slate-400 font-mono">{serverHealth.openaiModel ?? '—'}</span>
@@ -329,7 +335,9 @@ export function SettingsView() {
                 </li>
               </ul>
               <p className="text-slate-600 ml-4">
-                App use still requires at least one key saved in IndexedDB (Secure vault / setup screen).
+                {serverHealth.backend === 'sofia'
+                  ? 'Local development skips vendor API selection while Sofia is available.'
+                  : 'Save at least one vendor key in IndexedDB (Secure vault / setup screen) when Sofia is offline.'}
               </p>
             </div>
           ) : (
@@ -342,8 +350,8 @@ export function SettingsView() {
                 npm start
               </div>
               <p className="text-slate-600">
-                Start the server for Claude extraction. Without it, ChatGPT or Grok can still run from the browser
-                if you saved a key in the app.
+                Start the local server (or use the Vercel API proxy) for Claude and Grok.
+                Without a proxy, ChatGPT can still run from the browser if you saved an OpenAI key.
               </p>
             </div>
           )}

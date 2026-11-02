@@ -48,7 +48,7 @@ load_dotenv(ROOT / ".env", override=True)
 # ── Config ────────────────────────────────────────────────────────────────────
 PORT = int(os.getenv("EXTRACTION_SERVER_PORT", "3712"))
 SOFIA_BASE = os.getenv("SOFIA_BASE_URL", "https://sofia-api.lgw.cloud.mobileye.com/v1/api").rstrip("/")
-SOFIA_MODEL = os.getenv("SOFIA_MODEL_ID", "us.anthropic.claude-opus-4-5-20251101-v1:0")
+SOFIA_MODEL = os.getenv("SOFIA_MODEL_ID", "us.anthropic.claude-sonnet-5-5")
 MEEZEH_USER = os.getenv("MEEZEH_USERNAME", "")
 MEEZEH_PASS = os.getenv("MEEZEH_PASSWORD", "")
 SOFIA_API_KEY = os.getenv("SOFIA_API_KEY", "")  # pre-obtained token, skips Meezeh auth
@@ -113,15 +113,24 @@ Column mappings:
   Type                  → grantType
   Symbol / CUSIP        → tickerSymbol
   Grant Date            → grantDate  (→ YYYY-MM-DD)
-  Quantity / Shares     → totalShares
+  Quantity / Shares     → totalShares when original grant size is shown; for unvested-only
+                          remaining rows put Quantity in unvestedShares and leave vestedShares null
   Grant Price           → strikePrice
   Market Price          → fairMarketValue
   Total Est Mkt Value   → currentMarketValue
-  Vested rows           → vestedShares
-  Unvested rows         → unvestedShares
+  Vested rows           → vestedShares (do NOT invent unvestedShares=0)
+  Unvested rows         → unvestedShares (do NOT invent vestedShares=0)
+  Sellable Qty          → sellableShares (may be < vested after sales/transfers)
+  Sold / transferred    → soldShares (= vested − sellable when both known)
 
 Also look for: "Stock Plan Details", "Equity Awards", "Restricted Stock Units",
-"Potential Restricted Stock", "Vesting Schedule".
+"Potential Restricted Stock", "Vesting Schedule", separate Vested vs Unvested sections,
+Morgan Stanley By Status Sellable vs Unvested exports.
+
+Important: never invent 0 for the opposite vesting side — use null when unknown.
+If both vested and unvested quantities appear for the same grant number, emit ONE grant
+with both fields filled and totalShares = vested + unvested (or the stated original size).
+Sellable is NOT the same as vested — prefer explicit Sellable Qty when present.
 
 Respond with ONLY valid JSON, no markdown fences:
 {
@@ -141,6 +150,7 @@ Respond with ONLY valid JSON, no markdown fences:
     "vestingFrequency":   { "value": "<Monthly|Quarterly|Annual|Custom|null>", "confidence": <0-100> },
     "vestedShares":       { "value": <number|null>, "confidence": <0-100> },
     "unvestedShares":     { "value": <number|null>, "confidence": <0-100> },
+    "sellableShares":     { "value": <number|null>, "confidence": <0-100> },
     "exercisedShares":    { "value": <number|null>, "confidence": <0-100> },
     "cancelledShares":    { "value": <number|null>, "confidence": <0-100> },
     "soldShares":         { "value": <number|null>, "confidence": <0-100> },
@@ -156,6 +166,114 @@ Rules: Extract EVERY grant row. Dates → YYYY-MM-DD. Numbers → strip $, comma
 Confidence 95-100: explicitly stated. 70-94: inferred. 0-69: uncertain. No grants → {"grants":[]}"""
 
 
+# Sofia structured-output schema (OpenAI-compatible response_format / json_schema).
+# Keeps vested/unvested/total fields typed so Bedrock/Claude tool-injection stays consistent.
+_CONFIDENCE_PROP: dict[str, Any] = {"type": "integer", "minimum": 0, "maximum": 100}
+_STRING_FIELD: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "value": {"type": ["string", "null"]},
+        "confidence": _CONFIDENCE_PROP,
+    },
+    "required": ["value", "confidence"],
+    "additionalProperties": False,
+}
+_NUMBER_FIELD: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "value": {"type": ["number", "null"]},
+        "confidence": _CONFIDENCE_PROP,
+    },
+    "required": ["value", "confidence"],
+    "additionalProperties": False,
+}
+_GRANT_TYPE_FIELD: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "value": {
+            "type": ["string", "null"],
+            "enum": ["RSU", "ISO", "NSO", "ESPP", "RestrictedShares", "PerformanceShares", None],
+        },
+        "confidence": _CONFIDENCE_PROP,
+    },
+    "required": ["value", "confidence"],
+    "additionalProperties": False,
+}
+_VESTING_FREQ_FIELD: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "value": {
+            "type": ["string", "null"],
+            "enum": ["Monthly", "Quarterly", "Annual", "Custom", None],
+        },
+        "confidence": _CONFIDENCE_PROP,
+    },
+    "required": ["value", "confidence"],
+    "additionalProperties": False,
+}
+
+GRANT_EXTRACTION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "grants": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "grantId": _STRING_FIELD,
+                    "grantType": _GRANT_TYPE_FIELD,
+                    "companyName": _STRING_FIELD,
+                    "tickerSymbol": _STRING_FIELD,
+                    "grantDate": _STRING_FIELD,
+                    "vestingStartDate": _STRING_FIELD,
+                    "vestingEndDate": _STRING_FIELD,
+                    "totalShares": _NUMBER_FIELD,
+                    "strikePrice": _NUMBER_FIELD,
+                    "exercisePrice": _NUMBER_FIELD,
+                    "fairMarketValue": _NUMBER_FIELD,
+                    "cliffDuration": _NUMBER_FIELD,
+                    "vestingFrequency": _VESTING_FREQ_FIELD,
+                    "vestedShares": _NUMBER_FIELD,
+                    "unvestedShares": _NUMBER_FIELD,
+                    "sellableShares": _NUMBER_FIELD,
+                    "exercisedShares": _NUMBER_FIELD,
+                    "cancelledShares": _NUMBER_FIELD,
+                    "soldShares": _NUMBER_FIELD,
+                    "remainingShares": _NUMBER_FIELD,
+                    "currentMarketValue": _NUMBER_FIELD,
+                    "costBasis": _NUMBER_FIELD,
+                    "estimatedTaxBasis": _NUMBER_FIELD,
+                    "sourceSnippets": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "field": {"type": "string"},
+                                "snippet": {"type": "string"},
+                            },
+                            "required": ["field", "snippet"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["grants"],
+    "additionalProperties": False,
+}
+
+SOFIA_RESPONSE_FORMAT: dict[str, Any] = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "GrantExtraction",
+        "schema": GRANT_EXTRACTION_SCHEMA,
+        "strict": True,
+    },
+}
+
+
 # ── LLM helpers ───────────────────────────────────────────────────────────────
 def _strip_fences(text: str) -> str:
     import re
@@ -163,19 +281,69 @@ def _strip_fences(text: str) -> str:
              .rstrip("```").strip()
 
 
+def _sofia_message_content(content: Any) -> str:
+    if isinstance(content, list):  # Claude content blocks / tool payloads
+        parts: list[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use" and isinstance(block.get("input"), dict):
+                parts.append(json.dumps(block["input"]))
+            elif "text" in block:
+                parts.append(str(block.get("text") or ""))
+            elif "input" in block and isinstance(block["input"], dict):
+                parts.append(json.dumps(block["input"]))
+        return "".join(parts)
+    if isinstance(content, dict):
+        return json.dumps(content)
+    return str(content or "")
+
+
 async def _call_sofia(messages: list[dict], token: str) -> str:
-    async with httpx.AsyncClient(timeout=120) as client:
+    """Call Sofia OpenAI-compatible chat completions with json_schema enforcement."""
+    payload: dict[str, Any] = {
+        "model": SOFIA_MODEL,
+        "messages": messages,
+        "temperature": 0,
+        "response_format": SOFIA_RESPONSE_FORMAT,
+    }
+    async with httpx.AsyncClient(timeout=180) as client:
         r = await client.post(
             f"{SOFIA_BASE}/chat/completions",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={"model": SOFIA_MODEL, "messages": messages},
+            json=payload,
         )
+        # Some Bedrock models reject strict json_schema — fall back to json_object, then plain.
+        if r.status_code >= 400:
+            body = r.text[:400]
+            log.warning("Sofia json_schema failed (%s): %s — retrying json_object", r.status_code, body)
+            payload["response_format"] = {"type": "json_object"}
+            r = await client.post(
+                f"{SOFIA_BASE}/chat/completions",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json=payload,
+            )
+        if r.status_code >= 400:
+            body = r.text[:400]
+            log.warning("Sofia json_object failed (%s): %s — retrying without response_format", r.status_code, body)
+            payload.pop("response_format", None)
+            r = await client.post(
+                f"{SOFIA_BASE}/chat/completions",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json=payload,
+            )
         r.raise_for_status()
         data = r.json()
-    content = data["choices"][0]["message"]["content"]
-    if isinstance(content, list):  # Claude content blocks
-        content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
-    return content
+
+    message = data["choices"][0]["message"]
+    # Structured responses may land in tool_calls (Bedrock tool-injection path).
+    tool_calls = message.get("tool_calls") or []
+    if tool_calls:
+        for call in tool_calls:
+            fn = call.get("function") if isinstance(call, dict) else None
+            if isinstance(fn, dict) and fn.get("arguments"):
+                return str(fn["arguments"])
+    return _sofia_message_content(message.get("content"))
 
 
 async def _call_openai(messages: list[dict], api_key: str, model: str) -> str:
@@ -635,6 +803,8 @@ async def extract(req: ExtractRequest) -> dict[str, Any]:
     if not req.filename or not req.text:
         raise HTTPException(400, "filename and text are required")
 
+    # Local/dev: prefer Sofia whenever a token is available (SOFIA_API_KEY or Meezeh).
+    # Client vault keys / OPENAI|ANTHROPIC|GROK env keys are fallbacks only.
     token = get_sofia_token()
     use_sofia = bool(token)
 

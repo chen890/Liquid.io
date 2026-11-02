@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react';
 import { Search, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import type { GrantRecord, GrantType } from '../../types';
-import { usePortfolioStore } from '../../store/portfolioStore';
+import { usePortfolioStore, useWorkingGrants } from '../../store/portfolioStore';
+import { resolveVestingCounts } from '../../lib/vestingCounts';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -22,17 +23,15 @@ function GrantRow({ grant }: { grant: GrantRecord }) {
   const [expanded, setExpanded] = useState(false);
   const { deleteGrant } = usePortfolioStore();
 
-  const total   = grant.totalShares?.value ?? 0;
-  const unvest  = grant.unvestedShares?.value;
-  const vested  = grant.vestedShares?.value;
-
-  // Compute vested count: explicit, derived, or 0
-  const vestedCount =
-    vested !== undefined ? vested :
-    (unvest !== undefined && total > 0 ? Math.max(0, total - unvest) : undefined);
-
+  const { total, vested: vestedCount, unvested: unvest, sellable, sold } =
+    resolveVestingCounts(grant);
+  const hasVestingSplit =
+    grant.vestedShares?.value !== undefined ||
+    grant.unvestedShares?.value !== undefined ||
+    grant.sellableShares?.value !== undefined ||
+    total > 0;
   const vestedPct =
-    vestedCount !== undefined && total > 0
+    hasVestingSplit && total > 0
       ? Math.min(100, Math.round((vestedCount / total) * 100))
       : null;
 
@@ -70,17 +69,27 @@ function GrantRow({ grant }: { grant: GrantRecord }) {
         </td>
         {/* Total shares */}
         <td className="px-4 py-3 text-sm text-white font-mono">
-          {grant.totalShares?.value?.toLocaleString() ?? '—'}
+          {total > 0 ? total.toLocaleString() : (grant.totalShares?.value?.toLocaleString() ?? '—')}
         </td>
         {/* Vested RSUs — count + progress bar */}
         <td className="px-4 py-3">
-          {vestedCount !== undefined ? (
+          {hasVestingSplit ? (
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-mono text-emerald-400 font-medium">
-                  {vestedCount.toLocaleString()}
+                  {vestedCount.toLocaleString()} vested
                 </span>
-                {unvest !== undefined && (
+                {sellable !== vestedCount && (
+                  <span className="text-xs font-mono text-teal-400">
+                    · {sellable.toLocaleString()} sellable
+                  </span>
+                )}
+                {sold > 0 && (
+                  <span className="text-xs text-slate-600">
+                    · {sold.toLocaleString()} sold
+                  </span>
+                )}
+                {unvest > 0 && (
                   <span className="text-xs text-slate-600">
                     / {unvest.toLocaleString()} unvested
                   </span>
@@ -172,8 +181,8 @@ function GrantRow({ grant }: { grant: GrantRecord }) {
 }
 
 export function GrantsView() {
-  const { portfolio, setView } = usePortfolioStore();
-  const grants = portfolio.grants;
+  const { setView } = usePortfolioStore();
+  const grants = useWorkingGrants();
 
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');

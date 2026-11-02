@@ -1,7 +1,32 @@
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import type { Portfolio, GrantRecord, DocumentRecord, ExtractionSession, SaleTransaction, TradingWindow, AppView } from '../types';
 import * as storage from '../lib/storage';
 import { deduplicateAgainstPortfolio } from '../lib/ai/reconciler';
+import { normalizeGrantVesting } from '../lib/vestingCounts';
+
+/** Portfolio grants plus any not-yet-imported extraction results. */
+export function mergeWorkingGrants(
+  portfolioGrants: GrantRecord[],
+  pendingGrants: GrantRecord[],
+): GrantRecord[] {
+  if (pendingGrants.length === 0) return portfolioGrants;
+  const { toAdd, toUpdate } = deduplicateAgainstPortfolio(pendingGrants, portfolioGrants);
+  const byId = new Map(portfolioGrants.map((g) => [g.id, g]));
+  for (const g of toUpdate) byId.set(g.id, g);
+  for (const g of toAdd) byId.set(g.id, g);
+  return Array.from(byId.values());
+}
+
+/** Grants every explorer/insights view should read (includes pending extractions). */
+export function useWorkingGrants(): GrantRecord[] {
+  const portfolioGrants = usePortfolioStore((s) => s.portfolio.grants);
+  const pendingGrants = usePortfolioStore((s) => s.pendingGrants);
+  return useMemo(
+    () => mergeWorkingGrants(portfolioGrants, pendingGrants),
+    [portfolioGrants, pendingGrants],
+  );
+}
 
 interface PortfolioState {
   portfolio: Portfolio;
@@ -57,7 +82,10 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   loadPortfolio: async () => {
     set({ isLoading: true });
     const portfolio = await storage.loadPortfolio();
-    set({ portfolio, isLoading: false });
+    // Re-derive vested/unvested for grants saved before vesting normalization.
+    const grants = portfolio.grants.map(normalizeGrantVesting);
+    await Promise.all(grants.map((g) => storage.saveGrant(g)));
+    set({ portfolio: { ...portfolio, grants }, isLoading: false });
   },
 
   setView: (view) => set({ currentView: view }),
@@ -83,6 +111,8 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
 
   importPendingGrants: async () => {
     const { pendingGrants, pendingSession } = get();
+    if (pendingGrants.length === 0) return;
+
     const existingGrants = await storage.getGrants();
     const { toAdd, toUpdate } = deduplicateAgainstPortfolio(pendingGrants, existingGrants);
 

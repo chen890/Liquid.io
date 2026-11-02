@@ -1,5 +1,6 @@
 import type { GrantRecord, AIInsight } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { resolveVestingCounts } from './vestingCounts';
 
 export function generateInsights(grants: GrantRecord[]): AIInsight[] {
   if (grants.length === 0) return [];
@@ -133,63 +134,39 @@ export function generateInsights(grants: GrantRecord[]): AIInsight[] {
 
 export function computePortfolioStats(grants: GrantRecord[]) {
   const totalGrants = grants.length;
-  const totalShares = grants.reduce((s, g) => s + (g.totalShares?.value ?? 0), 0);
-  const totalVested = grants.reduce((s, g) => s + (g.vestedShares?.value ?? 0), 0);
-  const totalUnvested = grants.reduce((s, g) => s + (g.unvestedShares?.value ?? 0), 0);
+  const counts = grants.map(resolveVestingCounts);
+  const totalShares = counts.reduce((s, c) => s + c.total, 0);
+  const totalVested = counts.reduce((s, c) => s + c.vested, 0);
+  const totalUnvested = counts.reduce((s, c) => s + c.unvested, 0);
 
   // Use document-extracted prices throughout — fairMarketValue is the per-share
   // price at statement date; currentMarketValue is the total dollar value.
-  const pricePerShare = (g: GrantRecord) =>
+  const pricePerShare = (g: GrantRecord, total: number) =>
     g.fairMarketValue?.value ??
-    (g.currentMarketValue?.value && g.totalShares?.value
-      ? g.currentMarketValue.value / g.totalShares.value
+    (g.currentMarketValue?.value && total
+      ? g.currentMarketValue.value / total
       : 0);
 
-  // Vested value: explicit vestedShares × price, or fall back to
-  // (totalShares − unvestedShares) × price, or currentMarketValue when the
-  // grant represents fully-vested stock (vestedShares === totalShares).
-  const vestedValue = grants.reduce((s, g) => {
-    const price  = pricePerShare(g);
-    const vested = g.vestedShares?.value;
-    const total  = g.totalShares?.value ?? 0;
-    const unvest = g.unvestedShares?.value;
-
-    if (vested !== undefined) return s + price * vested;
-    if (unvest !== undefined && total > 0) return s + price * Math.max(0, total - unvest);
-    // Grant shows no vesting split — assume fully vested (e.g. already-settled stock)
+  const vestedValue = grants.reduce((s, g, i) => {
+    const { total, vested, unvested } = counts[i];
+    const price = pricePerShare(g, total);
+    if (vested > 0 || unvested > 0 || total > 0) return s + price * vested;
+    // No share counts — fall back to stated market value as vested holdings
     return s + (g.currentMarketValue?.value ?? 0);
   }, 0);
 
-  // Unvested value: explicit unvestedShares × price, or currentMarketValue
-  // (which for "Potential Restricted Stock" sections IS the unvested total).
-  const unvestedValue = grants.reduce((s, g) => {
-    const price  = pricePerShare(g);
-    const unvest = g.unvestedShares?.value;
-    const total  = g.totalShares?.value ?? 0;
-    const vested = g.vestedShares?.value;
-
-    if (unvest !== undefined) return s + price * unvest;
-    if (vested !== undefined && total > 0) return s + price * Math.max(0, total - vested);
-    // No explicit split — treat currentMarketValue as the unvested portion
-    return s + (g.currentMarketValue?.value ?? 0);
+  const unvestedValue = grants.reduce((s, g, i) => {
+    const { total, vested, unvested } = counts[i];
+    const price = pricePerShare(g, total);
+    if (vested > 0 || unvested > 0 || total > 0) return s + price * unvested;
+    return 0;
   }, 0);
 
-  // Sellable now = RSU/settled shares that are already vested
-  // Options need separate exercise step — flag separately
-  const sellableNowValue = grants.reduce((s, g) => {
-    const type   = g.grantType?.value ?? '';
-    const price  = pricePerShare(g);
-    const vested = g.vestedShares?.value;
-    const total  = g.totalShares?.value ?? 0;
-    const unvest = g.unvestedShares?.value;
-
-    const vestedCount =
-      vested !== undefined ? vested :
-      (unvest !== undefined && total > 0 ? Math.max(0, total - unvest) : 0);
-
-    // Options require exercise — not immediately sellable from this view
+  const sellableNowValue = grants.reduce((s, g, i) => {
+    const type = g.grantType?.value ?? '';
     if (['ISO', 'NSO'].includes(type)) return s;
-    return s + price * vestedCount;
+    const { total, sellable } = counts[i];
+    return s + pricePerShare(g, total) * sellable;
   }, 0);
 
   const totalValue = grants.reduce((s, g) => s + (g.currentMarketValue?.value ?? 0), 0);

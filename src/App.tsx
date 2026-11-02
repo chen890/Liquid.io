@@ -22,6 +22,7 @@ import { useAuthStore } from './store/authStore';
 import { usePortfolioStore } from './store/portfolioStore';
 import { useThemeStore } from './store/themeStore';
 import { hasAnySavedExtractionKey } from './lib/extractionKeys';
+import { ImportByStatusOnce } from './components/dev/ImportByStatusOnce';
 
 function ViewRouter() {
   const { currentView } = usePortfolioStore();
@@ -49,7 +50,8 @@ function ViewRouter() {
 function MainLayout() {
   const mainScrollRef = useRef<HTMLDivElement>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [keysReady, setKeysReady] = useState<boolean | null>(null);
+  // Local/dev: skip the API-key gate so the dashboard can render immediately.
+  const [keysReady, setKeysReady] = useState<boolean | null>(() => (import.meta.env.DEV ? true : null));
   const { loadPortfolio, isLoading } = usePortfolioStore();
   const currentView = usePortfolioStore((s) => s.currentView);
   const { user, backendHasAuth } = useAuthStore();
@@ -58,12 +60,22 @@ function MainLayout() {
   const closeMobileNav = () => setMobileNavOpen(false);
 
   useEffect(() => {
+    if (import.meta.env.DEV) {
+      setKeysReady(true);
+      return;
+    }
     void hasAnySavedExtractionKey().then(setKeysReady);
   }, [user, currentView]);
 
   useEffect(() => {
-    if (user || !backendHasAuth) void loadPortfolio();
+    // Local/dev can use the app without a signed-in user; still load IndexedDB portfolio.
+    if (import.meta.env.DEV || user || !backendHasAuth) void loadPortfolio();
   }, [user, backendHasAuth, loadPortfolio]);
+
+  useEffect(() => {
+    // Always land on the main dashboard for a fresh local session.
+    if (import.meta.env.DEV) usePortfolioStore.getState().setView('dashboard');
+  }, []);
 
   useEffect(() => {
     setMobileNavOpen(false);
@@ -112,6 +124,7 @@ function MainLayout() {
       className={`flex h-[100dvh] max-h-[100dvh] min-h-0 w-full overflow-hidden ${
         day ? 'bg-slate-100' : 'bg-[#0b0d14]'
       }`}>
+      <ImportByStatusOnce />
       {mobileNavOpen && (
         <button
           type="button"
@@ -167,6 +180,7 @@ function SessionProbeErrorScreen() {
 
 function AppShell() {
   const { authChecked, authError, backendHasAuth, user, initAuth } = useAuthStore();
+  const skipAuthGate = import.meta.env.DEV;
 
   useEffect(() => {
     void initAuth();
@@ -186,9 +200,9 @@ function AppShell() {
       <Route
         path="/*"
         element={
-          authError && backendHasAuth ? (
+          !skipAuthGate && authError && backendHasAuth ? (
             <SessionProbeErrorScreen />
-          ) : backendHasAuth && !user ? (
+          ) : !skipAuthGate && backendHasAuth && !user ? (
             <Navigate to="/sign-in" replace />
           ) : (
             <MainLayout />

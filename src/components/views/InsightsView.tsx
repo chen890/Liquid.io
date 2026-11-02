@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Lightbulb, TrendingUp, AlertTriangle, Info, Upload } from 'lucide-react';
-import { usePortfolioStore } from '../../store/portfolioStore';
+import { usePortfolioStore, useWorkingGrants } from '../../store/portfolioStore';
 import { generateInsights } from '../../lib/insights';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -33,10 +33,11 @@ const INSIGHT_CONFIG = {
 };
 
 export function InsightsView() {
-  const { portfolio, setView } = usePortfolioStore();
-  const insights = useMemo(() => generateInsights(portfolio.grants), [portfolio.grants]);
+  const { setView } = usePortfolioStore();
+  const grants = useWorkingGrants();
+  const insights = useMemo(() => generateInsights(grants), [grants]);
 
-  if (portfolio.grants.length === 0) {
+  if (grants.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 p-12 text-center">
         <div className="w-14 h-14 rounded-2xl bg-amber-600/20 border border-amber-700/30 flex items-center justify-center">
@@ -61,7 +62,7 @@ export function InsightsView() {
       <div>
         <h1 className="text-xl font-semibold text-white">AI Insights</h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          Generated from {portfolio.grants.length} grant{portfolio.grants.length > 1 ? 's' : ''} in your portfolio
+          Generated from {grants.length} grant{grants.length > 1 ? 's' : ''} in your portfolio
         </p>
       </div>
 

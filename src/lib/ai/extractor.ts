@@ -2,6 +2,7 @@ import type { GrantRecord, ExtractedField, GrantType, VestingFrequency, Extracti
 import { v4 as uuidv4 } from 'uuid';
 import { getSetting } from '../storage';
 import { getExtractionKeyForProvider, providerDisplayName } from '../extractionKeys';
+import { normalizeGrantVesting } from '../vestingCounts';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Raw types returned by the AI (OpenAI + Anthropic use the same schema)
@@ -24,6 +25,7 @@ interface RawGrantData {
   vestingFrequency?: RawField<string>;
   vestedShares?: RawField<number>;
   unvestedShares?: RawField<number>;
+  sellableShares?: RawField<number>;
   exercisedShares?: RawField<number>;
   cancelledShares?: RawField<number>;
   soldShares?: RawField<number>;
@@ -53,11 +55,23 @@ Column mappings:
   Grant Price           → strikePrice
   Market Price          → fairMarketValue
   Total Est Mkt Value   → currentMarketValue
-  Vested rows           → vestedShares
-  Unvested rows         → unvestedShares
+  Vested rows           → vestedShares  (Quantity goes here; do NOT set unvestedShares to 0)
+  Unvested rows         → unvestedShares (Quantity goes here; do NOT set vestedShares to 0)
+  Sellable Qty          → sellableShares (may be < vested after sales/transfers)
+  Sold / transferred    → soldShares (= vested − sellable when both are known)
+  Quantity / Shares     → also copy into totalShares when the original grant size is shown;
+                          if only an unvested remaining quantity is shown, put it in
+                          unvestedShares and leave vestedShares null (not 0)
 
 Also look for: "Stock Plan Details", "Equity Awards", "Restricted Stock Units",
-"Potential Restricted Stock", "Vesting Schedule".
+"Potential Restricted Stock", "Vesting Schedule", separate Vested vs Unvested sections,
+Morgan Stanley "By Status" Sellable vs Unvested exports.
+
+Important: never invent 0 for the opposite vesting side. Use null when unknown.
+If both vested and unvested quantities appear for the same grant number, emit ONE grant
+with both vestedShares and unvestedShares filled, and totalShares = vested + unvested
+(or the stated original grant size if larger).
+Sellable is NOT the same as vested — prefer explicit Sellable Qty when present.
 
 Respond with ONLY valid JSON, no markdown fences:
 {
@@ -77,6 +91,7 @@ Respond with ONLY valid JSON, no markdown fences:
     "vestingFrequency":   { "value": "<Monthly|Quarterly|Annual|Custom|null>", "confidence": <0-100> },
     "vestedShares":       { "value": <number|null>, "confidence": <0-100> },
     "unvestedShares":     { "value": <number|null>, "confidence": <0-100> },
+    "sellableShares":     { "value": <number|null>, "confidence": <0-100> },
     "exercisedShares":    { "value": <number|null>, "confidence": <0-100> },
     "cancelledShares":    { "value": <number|null>, "confidence": <0-100> },
     "soldShares":         { "value": <number|null>, "confidence": <0-100> },
@@ -116,7 +131,7 @@ function rawToGrantRecord(raw: RawGrantData, filename: string): GrantRecord {
   const f = <T>(field: RawField<T> | undefined, name: string) =>
     makeField(field, filename, snip, name);
 
-  return {
+  return normalizeGrantVesting({
     id: uuidv4(),
     grantId: f(raw.grantId, 'grantId'),
     grantType: raw.grantType?.value != null
@@ -137,6 +152,7 @@ function rawToGrantRecord(raw: RawGrantData, filename: string): GrantRecord {
       : undefined,
     vestedShares: f(raw.vestedShares, 'vestedShares'),
     unvestedShares: f(raw.unvestedShares, 'unvestedShares'),
+    sellableShares: f(raw.sellableShares, 'sellableShares'),
     exercisedShares: f(raw.exercisedShares, 'exercisedShares'),
     cancelledShares: f(raw.cancelledShares, 'cancelledShares'),
     soldShares: f(raw.soldShares, 'soldShares'),
@@ -145,7 +161,7 @@ function rawToGrantRecord(raw: RawGrantData, filename: string): GrantRecord {
     costBasis: f(raw.costBasis, 'costBasis'),
     estimatedTaxBasis: f(raw.estimatedTaxBasis, 'estimatedTaxBasis'),
     sourceFiles: [filename],
-  };
+  });
 }
 
 function chunkText(text: string, maxChars: number): string[] {
@@ -174,6 +190,9 @@ function stripFences(s: string): string {
 // ──────────────────────────────────────────────────────────────────────────────
 export interface ServerHealth {
   online: boolean;
+  backend?: 'sofia' | 'fallback' | string;
+  sofiaKeyConfigured?: boolean;
+  model?: string;
   openaiEnvConfigured: boolean;
   anthropicEnvConfigured: boolean;
   grokEnvConfigured: boolean;
@@ -182,9 +201,14 @@ export interface ServerHealth {
   grokModel?: string;
 }
 
+export function serverUsesSofia(health: ServerHealth | null | undefined): boolean {
+  return Boolean(health?.online && health.backend === 'sofia');
+}
+
 export async function checkServerHealth(): Promise<ServerHealth> {
   try {
-    const r = await fetch('/api/health', { signal: AbortSignal.timeout(2000) });
+    // Allow cold-start latency on Vercel serverless.
+    const r = await fetch('/api/health', { signal: AbortSignal.timeout(8000) });
     if (!r.ok) {
       return {
         online: false,
@@ -194,6 +218,9 @@ export async function checkServerHealth(): Promise<ServerHealth> {
       };
     }
     const d = await r.json() as {
+      backend?: string;
+      sofiaKeyConfigured?: boolean;
+      model?: string;
       openaiEnvConfigured?: boolean;
       anthropicEnvConfigured?: boolean;
       grokEnvConfigured?: boolean;
@@ -203,6 +230,9 @@ export async function checkServerHealth(): Promise<ServerHealth> {
     };
     return {
       online: true,
+      backend: d.backend,
+      sofiaKeyConfigured: d.sofiaKeyConfigured ?? false,
+      model: d.model,
       openaiEnvConfigured: d.openaiEnvConfigured ?? false,
       anthropicEnvConfigured: d.anthropicEnvConfigured ?? false,
       grokEnvConfigured: d.grokEnvConfigured ?? false,
@@ -221,7 +251,6 @@ export async function checkServerHealth(): Promise<ServerHealth> {
 }
 
 const OPENAI_MODEL = 'gpt-4o';
-const GROK_MODEL = 'grok-3-latest';
 
 export async function extractGrantsFromText(
   text: string,
@@ -238,18 +267,23 @@ export async function extractGrantsFromText(
   const human = providerDisplayName(provider);
 
   const key = apiKey.trim() || (await getExtractionKeyForProvider(provider)) || '';
-  if (!key) {
+  const health = await checkServerHealth();
+  const useSofia = serverUsesSofia(health);
+
+  if (!key && !useSofia) {
     throw new Error(
       `No API key saved for ${human}. Add it under Secure vault (or the setup screen), then try again.`,
     );
   }
 
-  const health = await checkServerHealth();
-
   if (health.online) {
     for (let i = 0; i < chunks.length; i++) {
       const label = chunks.length > 1 ? `${filename} (part ${i + 1}/${chunks.length})` : filename;
-      onProgress?.(`Analyzing ${label} via ${human}…`);
+      onProgress?.(
+        useSofia
+          ? `Analyzing ${label} via Sofia (${health.model ?? 'server model'})…`
+          : `Analyzing ${label} via ${human}…`,
+      );
 
       const res = await fetch('/api/extract', {
         method: 'POST',
@@ -276,30 +310,26 @@ export async function extractGrantsFromText(
     return allGrants;
   }
 
-  if (provider === 'anthropic') {
+  // xAI and Anthropic block browser-origin calls (CORS / 403). Need /api/extract proxy.
+  if (provider === 'anthropic' || provider === 'grok') {
     throw new Error(
-      'Claude extraction needs the local API server (Anthropic blocks browser calls). Run: npm start',
+      `${human} extraction needs the API proxy (browser calls are blocked). ` +
+        'Deploy with Vercel API routes, or run locally: npm start',
     );
   }
-
-  const endpoint =
-    provider === 'grok'
-      ? 'https://api.x.ai/v1/chat/completions'
-      : 'https://api.openai.com/v1/chat/completions';
-  const model = provider === 'grok' ? GROK_MODEL : OPENAI_MODEL;
 
   for (let i = 0; i < chunks.length; i++) {
     const label = chunks.length > 1 ? `${filename} (part ${i + 1}/${chunks.length})` : filename;
     onProgress?.(`Analyzing ${label} via ${human} (direct)…`);
 
-    const res = await fetch(endpoint, {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
-        model,
+        model: OPENAI_MODEL,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: `File: ${label}\n\n${chunks[i]}` },

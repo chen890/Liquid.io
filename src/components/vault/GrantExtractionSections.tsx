@@ -12,7 +12,7 @@ import {
   isValidGrokExtractionKey,
   providerDisplayName,
 } from '../../lib/extractionKeys';
-import { checkServerHealth } from '../../lib/ai/extractor';
+import { checkServerHealth, serverUsesSofia } from '../../lib/ai/extractor';
 import type { ServerHealth } from '../../lib/ai/extractor';
 import { Button } from '../ui/Button';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
@@ -89,12 +89,35 @@ export function GrantExtractionSections({ onKeysChanged }: Props) {
   const anthropicTrim = anthropicKey.trim();
   const grokTrim = grokKey.trim();
   const hasAnyKey = Boolean(openaiTrim || anthropicTrim || grokTrim);
+  const skipApiSelection = import.meta.env.DEV && serverUsesSofia(serverHealth);
 
   const agents: { id: ExtractionProvider; subtitle: string }[] = [
     { id: 'openai', subtitle: `Model · ${serverHealth?.openaiModel ?? 'gpt-4o'}` },
     { id: 'anthropic', subtitle: `Model · ${serverHealth?.anthropicModel ?? 'claude-sonnet-4'}` },
     { id: 'grok', subtitle: `Model · ${serverHealth?.grokModel ?? 'grok-3-latest'}` },
   ];
+
+  if (skipApiSelection) {
+    return (
+      <Card padding="md">
+        <CardHeader>
+          <CardTitle>Extraction backend</CardTitle>
+          <Server className="w-4 h-4 text-slate-600" />
+        </CardHeader>
+        <div className="space-y-2">
+          <p className="text-sm text-emerald-400 flex items-center gap-1.5">
+            <Server className="w-3.5 h-3.5 shrink-0" />
+            Local development uses Sofia
+          </p>
+          <p className="text-xs text-slate-500">
+            API provider selection is skipped while{' '}
+            <span className="font-mono text-slate-400">{serverHealth?.model ?? 'Sofia'}</span> is available.
+            Vendor keys in this browser are unused unless Sofia is offline.
+          </p>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <>
@@ -106,7 +129,7 @@ export function GrantExtractionSections({ onKeysChanged }: Props) {
         <div className="space-y-4">
           <p className="text-xs text-slate-500">
             Uploads use <strong className="text-slate-400">one</strong> backend at a time. Save at least one API key
-            below — keys are stored separately in this browser and are required to use the app.
+            below — keys are stored separately in this browser.
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -130,6 +153,9 @@ export function GrantExtractionSections({ onKeysChanged }: Props) {
             <p className="text-xs text-emerald-500/90 flex items-center gap-1.5 flex-wrap">
               <Server className="w-3.5 h-3.5 shrink-0" />
               <span>Extraction server online</span>
+              {serverUsesSofia(serverHealth) && (
+                <span className="text-slate-500">· Sofia · {serverHealth.model ?? 'configured'}</span>
+              )}
               {serverHealth.openaiEnvConfigured && (
                 <span className="text-slate-500">· OPENAI_API_KEY in .env</span>
               )}
@@ -142,7 +168,7 @@ export function GrantExtractionSections({ onKeysChanged }: Props) {
             </p>
           )}
 
-          {!hasAnyKey && (
+          {!hasAnyKey && !serverUsesSofia(serverHealth) && (
             <p className="text-xs text-amber-400">
               Save at least one valid API key (OpenAI, Anthropic, or Grok) to unlock the app.
             </p>
@@ -222,7 +248,7 @@ export function GrantExtractionSections({ onKeysChanged }: Props) {
           </CardHeader>
           <div className="space-y-4">
             <p className="text-xs text-slate-500">
-              Used when <strong className="text-slate-400">Claude</strong> is the active agent. Needs the local API server (CORS).
+              Used when <strong className="text-slate-400">Claude</strong> is the active agent. Proxied via the API (browser blocked).
             </p>
             <div>
               <label className="text-xs text-slate-500 block mb-1.5">Anthropic API key</label>
@@ -281,6 +307,7 @@ export function GrantExtractionSections({ onKeysChanged }: Props) {
           <div className="space-y-4">
             <p className="text-xs text-slate-500">
               Used when <strong className="text-slate-400">Grok</strong> is the active agent. Stored in IndexedDB.
+              Proxied via the API (xAI blocks browser calls).
             </p>
             <div>
               <label className="text-xs text-slate-500 block mb-1.5">Grok API key</label>

@@ -15,7 +15,7 @@ import {
   PriceScaleMode,
 } from 'lightweight-charts';
 import { RefreshCw, Moon, Sunrise } from 'lucide-react';
-import { usePortfolioStore } from '../../store/portfolioStore';
+import { useWorkingGrants } from '../../store/portfolioStore';
 import { Card } from '../ui/Card';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -108,9 +108,9 @@ function vixLinePoints(mainCandles: Candle[], vixCandles: Candle[]): { time: imp
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export function CandleChartView() {
-  const { portfolio } = usePortfolioStore();
+  const grants = useWorkingGrants();
   const tickers = [...new Set(
-    portfolio.grants.map((g) => g.tickerSymbol?.value).filter(Boolean) as string[]
+    grants.map((g) => g.tickerSymbol?.value).filter(Boolean) as string[]
   )];
 
   const [ticker, setTicker]       = useState(tickers[0] ?? 'MBLY');

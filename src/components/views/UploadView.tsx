@@ -5,7 +5,9 @@ import type { DocumentRecord, ExtractionProvider } from '../../types';
 import { usePortfolioStore } from '../../store/portfolioStore';
 import { useAuthStore } from '../../store/authStore';
 import { parseFile } from '../../lib/parsers';
-import { extractGrantsFromText, checkServerHealth } from '../../lib/ai/extractor';
+import { tryParseMorganStanleyByStatusFile } from '../../lib/parsers/morganStanleyByStatus';
+import type { GrantRecord } from '../../types';
+import { extractGrantsFromText, checkServerHealth, serverUsesSofia } from '../../lib/ai/extractor';
 import type { ServerHealth } from '../../lib/ai/extractor';
 import { reconcileGrants } from '../../lib/ai/reconciler';
 import { getSetting } from '../../lib/storage';
@@ -39,6 +41,7 @@ export function UploadView() {
   const {
     addDocuments, updateDocument,
     setPendingGrants, setPendingSession,
+    importPendingGrants,
     setView,
     addProcessingLog, clearProcessingLog,
     processingLog, isProcessing, setProcessing,
@@ -113,8 +116,10 @@ export function UploadView() {
     setGrokKey((await getSetting<string>(EXTRACTION_KEY_GROK)) ?? '');
     setExtractionProvider(provider);
 
-    // App-saved key required (server .env alone is not enough).
-    if (!key.trim()) return;
+    const health = await checkServerHealth();
+    setServerHealth(health);
+    // Local/dev: Sofia covers auth when configured; otherwise need a vault key.
+    if (!key.trim() && !serverUsesSofia(health)) return;
 
     setProcessing(true);
     clearProcessingLog();
@@ -130,7 +135,7 @@ export function UploadView() {
     }));
 
     await addDocuments(docRecords);
-    const allGrants: ReturnType<typeof reconcileGrants> = [];
+    const allGrants: GrantRecord[] = [];
 
     try {
       for (let i = 0; i < files.length; i++) {
@@ -154,15 +159,27 @@ export function UploadView() {
           `  Parsed ${file.name} (${parsed.pageCount ? parsed.pageCount + ' pages, ' : ''}${humanSize(file.size)})`,
         );
 
-        let docGrants: ReturnType<typeof reconcileGrants>;
+        let docGrants: GrantRecord[];
         try {
-          docGrants = await extractGrantsFromText(
-            parsed.text,
-            file.name,
-            key,
-            (msg) => addProcessingLog(`  ${msg}`),
-            provider,
-          );
+          // Morgan Stanley "By Status" Excel: deterministic parse (sellable ≠ vested).
+          const byStatus =
+            /\.xlsx?$/i.test(file.name)
+              ? await tryParseMorganStanleyByStatusFile(file, file.name)
+              : null;
+          if (byStatus?.length) {
+            addProcessingLog(
+              `  Detected Morgan Stanley By Status export — parsed ${byStatus.length} grant(s) with sellable quantities (no LLM).`,
+            );
+            docGrants = byStatus;
+          } else {
+            docGrants = await extractGrantsFromText(
+              parsed.text,
+              file.name,
+              key,
+              (msg) => addProcessingLog(`  ${msg}`),
+              provider,
+            );
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           addProcessingLog(`  Error extracting from ${file.name}: ${msg}`);
@@ -199,8 +216,12 @@ export function UploadView() {
         grantIds: [],
         status: 'review',
       });
+      // Persist into the portfolio immediately so Grant Explorer / Insights / etc. use the analysis.
+      addProcessingLog(`Importing ${reconciled.length} grant(s) into portfolio…`);
+      await importPendingGrants();
+      addProcessingLog('Imported — available across Dashboard, Grant Explorer, Insights, and more.');
       setProcessing(false);
-      setView('review');
+      setView('grants');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       addProcessingLog(`\nFatal error: ${msg}`);
@@ -215,16 +236,20 @@ export function UploadView() {
       : extractionProvider === 'anthropic'
         ? anthropicKey
         : grokKey;
-  const hasCredentials = keyForProvider.trim().length > 0;
-  const anthropicNeedsServer = extractionProvider === 'anthropic' && !serverHealth?.online;
-  const canProcess = hasCredentials && !anthropicNeedsServer;
+  const sofiaReady = serverUsesSofia(serverHealth);
+  const hasCredentials = sofiaReady || keyForProvider.trim().length > 0;
+  const providerNeedsProxy =
+    !sofiaReady &&
+    (extractionProvider === 'anthropic' || extractionProvider === 'grok') &&
+    !serverHealth?.online;
+  const canProcess = hasCredentials && !providerNeedsProxy;
 
   return (
     <div className="mx-auto min-h-0 w-full max-w-3xl space-y-6 px-4 py-4 sm:p-6">
       <div>
         <h1 className="text-xl font-semibold text-white">Upload Documents</h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          Upload equity documents — ChatGPT, Claude, or Grok extracts every grant (API key saved in the app).
+          Upload equity documents — local extraction uses Sofia when configured, otherwise ChatGPT / Claude / Grok.
         </p>
       </div>
 
@@ -238,19 +263,21 @@ export function UploadView() {
         ) : (
           <>
             <Server className="w-3.5 h-3.5 text-slate-500" />
-            <span className="text-slate-500">Extraction server offline — ChatGPT/Grok can run direct from a saved browser key</span>
+            <span className="text-slate-500">API proxy offline — ChatGPT can still run direct from a saved browser key</span>
           </>
         )}
         <span className="px-2 py-0.5 rounded border text-xs font-medium border-indigo-800 bg-indigo-950/40 text-indigo-300">
-          Using: {providerDisplayName(extractionProvider)}
+          Using: {sofiaReady ? `Sofia · ${serverHealth?.model ?? 'server model'}` : providerDisplayName(extractionProvider)}
         </span>
       </div>
 
-      {anthropicNeedsServer && (
+      {providerNeedsProxy && (
         <div className="flex items-start gap-3 bg-amber-950/40 border border-amber-800/60 rounded-xl px-4 py-3">
           <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
           <div className="text-sm text-amber-200">
-            Claude extraction needs the local API server. Run <code className="font-mono text-xs">npm start</code> in this repo, or switch to ChatGPT/Grok in Secure vault for browser-direct calls.
+            {providerDisplayName(extractionProvider)} needs the API proxy (browser calls are blocked).
+            Use the Vercel deploy, or run <code className="font-mono text-xs">npm start</code> locally.
+            Or switch to ChatGPT for browser-only extraction.
           </div>
         </div>
       )}

@@ -14,7 +14,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend,
 } from 'recharts';
 import { BarChart2, TrendingUp, Download, Dices } from 'lucide-react';
-import { usePortfolioStore } from '../../store/portfolioStore';
+import { usePortfolioStore, useWorkingGrants } from '../../store/portfolioStore';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 
@@ -147,8 +147,7 @@ function BenchmarkTab({ ticker }: { ticker: string }) {
 // TWRR tab
 // ──────────────────────────────────────────────────────────────────────────────
 function TWRRTab() {
-  const { portfolio } = usePortfolioStore();
-  const { grants } = portfolio;
+  const grants = useWorkingGrants();
 
   const [livePrice, setLivePrice] = useState<Record<string, number>>({});
   const tickers = [...new Set(grants.map((g) => g.tickerSymbol?.value).filter(Boolean) as string[])];
@@ -400,7 +399,8 @@ function MonteCarloTab({ ticker }: { ticker: string }) {
 // Export tab (G8)
 // ──────────────────────────────────────────────────────────────────────────────
 function ExportTab() {
-  const { grants, transactions } = usePortfolioStore().portfolio;
+  const transactions = usePortfolioStore((s) => s.portfolio.transactions);
+  const grants = useWorkingGrants();
 
   const exportGrants = () => {
     const year = new Date().getFullYear();
@@ -526,8 +526,8 @@ function downloadCSV(filename: string, rows: string[][]) {
 // Main component
 // ──────────────────────────────────────────────────────────────────────────────
 export function PortfolioAnalyticsView() {
-  const { portfolio } = usePortfolioStore();
-  const primaryTicker = portfolio.grants.find((g) => g.tickerSymbol?.value)?.tickerSymbol?.value ?? '';
+  const grants = useWorkingGrants();
+  const primaryTicker = grants.find((g) => g.tickerSymbol?.value)?.tickerSymbol?.value ?? '';
 
   const [tab, setTab] = useState<'benchmark' | 'twrr' | 'monte' | 'export'>('benchmark');
 

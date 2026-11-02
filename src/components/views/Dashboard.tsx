@@ -5,9 +5,10 @@ import {
   ComposedChart, Area,
 } from 'recharts';
 import { TrendingUp, DollarSign, Layers, ArrowRight, Clock, Tag, Banknote, RefreshCw } from 'lucide-react';
-import { usePortfolioStore } from '../../store/portfolioStore';
+import { usePortfolioStore, useWorkingGrants } from '../../store/portfolioStore';
 import { computePortfolioStats } from '../../lib/insights';
 import { getAllVestingEvents, groupByMonth } from '../../lib/vestingSchedule';
+import { resolveVestingCounts } from '../../lib/vestingCounts';
 import { VestedInsights } from './VestedInsights';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
@@ -124,7 +125,7 @@ function useLivePrices(tickers: string[], refreshKey = 0): {
 // ──────────────────────────────────────────────────────────────────────────────
 export function Dashboard() {
   const { portfolio, setView } = usePortfolioStore();
-  const grants = portfolio.grants;
+  const grants = useWorkingGrants();
   const stats  = useMemo(() => computePortfolioStats(grants), [grants]);
 
   // Live prices — collect unique tickers from all grants
@@ -152,20 +153,14 @@ export function Dashboard() {
       const price      = livePrice ?? docPrice;
       if (livePrice != null) pricesLoaded++;
 
-      const total  = g.totalShares?.value ?? 0;
-      const unvest = g.unvestedShares?.value;
-      const vested = g.vestedShares?.value;
-
-      const vestedCount = vested !== undefined ? vested
-        : (unvest !== undefined && total > 0 ? Math.max(0, total - unvest) : 0);
-      const unvestedCount = unvest !== undefined ? unvest
-        : (vested !== undefined && total > 0 ? Math.max(0, total - vested) : total);
+      const { vested: vestedCount, unvested: unvestedCount, sellable: sellableCount } =
+        resolveVestingCounts(g);
 
       liveVestedValue   += price * vestedCount;
       liveUnvestedValue += price * unvestedCount;
 
       const type = g.grantType?.value ?? '';
-      if (!['ISO', 'NSO'].includes(type)) liveSellableValue += price * vestedCount;
+      if (!['ISO', 'NSO'].includes(type)) liveSellableValue += price * sellableCount;
     }
 
     return { liveVestedValue, liveSellableValue, liveUnvestedValue, pricesLoaded };
@@ -362,13 +357,7 @@ export function Dashboard() {
         const sellableGrants = grants.filter((g) => {
           const type = g.grantType?.value ?? '';
           if (['ISO', 'NSO'].includes(type)) return false;
-          const vested  = g.vestedShares?.value;
-          const total   = g.totalShares?.value ?? 0;
-          const unvest  = g.unvestedShares?.value;
-          const count =
-            vested !== undefined ? vested :
-            (unvest !== undefined && total > 0 ? Math.max(0, total - unvest) : total);
-          return count > 0;
+          return resolveVestingCounts(g).sellable > 0;
         });
         if (sellableGrants.length === 0) return null;
 
@@ -376,9 +365,9 @@ export function Dashboard() {
           <Card padding="none">
             <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
               <div>
-                <CardTitle>Currently Vested — Sellable Now</CardTitle>
+                <CardTitle>Sellable Now</CardTitle>
                 <p className="text-xs text-slate-600 mt-0.5">
-                  RSU shares already vested and held in your account · subject to company trading windows
+                  RSU shares available to sell (vested minus sold/transferred) · subject to trading windows
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -399,7 +388,7 @@ export function Dashboard() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-800 bg-slate-950/40">
-                    {['Grant', 'Grant Date', 'Type', 'Source', 'Vested Shares', 'Doc Price', 'Current Price', 'Current Value', 'P&L', 'Status'].map((h) => (
+                    {['Grant', 'Grant Date', 'Type', 'Source', 'Sellable', 'Vested', 'Doc Price', 'Current Price', 'Current Value', 'P&L', 'Status'].map((h) => (
                       <th key={h} className="text-left px-4 py-2.5 text-xs text-slate-500 font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -407,11 +396,7 @@ export function Dashboard() {
                 <tbody className="divide-y divide-slate-800/60">
                   {sellableGrants.map((g) => {
                     const type    = g.grantType?.value ?? 'Grant';
-                    const total   = g.totalShares?.value ?? 0;
-                    const unvest  = g.unvestedShares?.value;
-                    const vested  = g.vestedShares?.value;
-                    const count   = vested !== undefined ? vested :
-                      (unvest !== undefined && total > 0 ? Math.max(0, total - unvest) : total);
+                    const { total, vested, sellable: count, sold } = resolveVestingCounts(g);
                     const docPrice = g.fairMarketValue?.value ??
                       (g.currentMarketValue?.value && total ? g.currentMarketValue.value / total : 0);
                     const ticker   = g.tickerSymbol?.value ?? '';
@@ -452,9 +437,18 @@ export function Dashboard() {
                         <td className="px-4 py-2.5">
                           <span className="text-xs text-slate-600 max-w-28 truncate block">{g.sourceFiles[0]}</span>
                         </td>
-                        {/* Vested shares */}
-                        <td className="px-4 py-2.5 font-mono text-xs text-white">
+                        {/* Sellable shares */}
+                        <td className="px-4 py-2.5 font-mono text-xs text-teal-300">
                           {count.toLocaleString()}
+                          {sold > 0 && (
+                            <span className="block text-[10px] text-slate-600 mt-0.5">
+                              −{sold.toLocaleString()} sold
+                            </span>
+                          )}
+                        </td>
+                        {/* Vested shares */}
+                        <td className="px-4 py-2.5 font-mono text-xs text-slate-400">
+                          {vested.toLocaleString()}
                         </td>
                         {/* Doc price */}
                         <td className="px-4 py-2.5">

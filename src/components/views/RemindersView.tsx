@@ -6,7 +6,7 @@
 
 import { useMemo, useState, useEffect } from 'react';
 import { Bell, CheckCircle, Calendar, TrendingUp, AlertTriangle, Clock } from 'lucide-react';
-import { usePortfolioStore } from '../../store/portfolioStore';
+import { usePortfolioStore, useWorkingGrants } from '../../store/portfolioStore';
 import { getAllVestingEvents } from '../../lib/vestingSchedule';
 import { currentTradingWindow, nextTradingWindow } from '../../lib/tradingWindows';
 import { getSetting, saveSetting } from '../../lib/storage';
@@ -48,7 +48,8 @@ const TYPE_ICONS: Record<Reminder['type'], typeof Bell> = {
 
 export function RemindersView() {
   const { portfolio, setView } = usePortfolioStore();
-  const { grants, tradingWindows } = portfolio;
+  const { tradingWindows } = portfolio;
+  const grants = useWorkingGrants();
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
   // Load dismissed list from IndexedDB

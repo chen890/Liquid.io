@@ -105,6 +105,8 @@ export interface GrantRecord {
   // Current Status
   vestedShares?: ExtractedField<number>;
   unvestedShares?: ExtractedField<number>;
+  /** Shares currently available to sell (may be < vested after sales/transfers). */
+  sellableShares?: ExtractedField<number>;
   exercisedShares?: ExtractedField<number>;
   cancelledShares?: ExtractedField<number>;
   soldShares?: ExtractedField<number>;

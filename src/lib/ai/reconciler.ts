@@ -1,5 +1,6 @@
 import type { GrantRecord, ExtractedField } from '../../types';
 import { v4 as uuidv4 } from 'uuid';
+import { normalizeGrantVesting } from '../vestingCounts';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Scoring
@@ -101,12 +102,31 @@ function mergeField<T>(
 }
 
 /**
+ * Prefer a real share count over an explicit 0 / missing value.
+ * Unvested-only statement rows often ship `vestedShares: 0` at high confidence
+ * and would otherwise wipe a real vested quantity from a vested row.
+ */
+function pickShareCount(
+  a: ExtractedField<number> | undefined,
+  b: ExtractedField<number> | undefined,
+): ExtractedField<number> | undefined {
+  if (!a && !b) return undefined;
+  if (!a) return b;
+  if (!b) return a;
+  const av = a.value ?? 0;
+  const bv = b.value ?? 0;
+  if (av > 0 && bv <= 0) return a;
+  if (bv > 0 && av <= 0) return b;
+  return av >= bv ? a : b;
+}
+
+/**
  * Merge two grants, keeping the highest-confidence value for each field.
  * For time-sensitive fields (price, unvestedShares, currentMarketValue),
  * the value from the grant with the LATER source file wins.
  */
 export function mergeGrants(base: GrantRecord, incoming: GrantRecord): GrantRecord {
-  return {
+  return normalizeGrantVesting({
     id: base.id, // preserve the canonical ID of the base record
     grantId:            mergeField(base.grantId,            incoming.grantId),
     grantType:          mergeField(base.grantType,          incoming.grantType),
@@ -121,22 +141,26 @@ export function mergeGrants(base: GrantRecord, incoming: GrantRecord): GrantReco
     exercisePrice:      mergeField(base.exercisePrice,      incoming.exercisePrice),
     // Time-sensitive — use incoming (assumed to be newer)
     fairMarketValue:    mergeField(incoming.fairMarketValue,    base.fairMarketValue),
-    unvestedShares:     mergeField(incoming.unvestedShares,     base.unvestedShares),
+    unvestedShares:     pickShareCount(incoming.unvestedShares, base.unvestedShares),
     currentMarketValue: mergeField(incoming.currentMarketValue, base.currentMarketValue),
-    vestedShares:       mergeField(incoming.vestedShares,       base.vestedShares),
+    vestedShares:       pickShareCount(incoming.vestedShares,   base.vestedShares),
+    sellableShares:     pickShareCount(incoming.sellableShares, base.sellableShares),
     cliffDuration:      mergeField(base.cliffDuration,      incoming.cliffDuration),
     vestingFrequency:   mergeField(base.vestingFrequency,   incoming.vestingFrequency),
     exercisedShares:    mergeField(base.exercisedShares,    incoming.exercisedShares),
     cancelledShares:    mergeField(base.cancelledShares,    incoming.cancelledShares),
-    soldShares:         mergeField(base.soldShares,         incoming.soldShares),
+    soldShares:         pickShareCount(incoming.soldShares, base.soldShares),
     remainingShares:    mergeField(incoming.remainingShares,    base.remainingShares),
     costBasis:          mergeField(base.costBasis,          incoming.costBasis),
     estimatedTaxBasis:  mergeField(base.estimatedTaxBasis,  incoming.estimatedTaxBasis),
+    taxRoute:           incoming.taxRoute ?? base.taxRoute,
+    vestLots:           (incoming.vestLots?.length ? incoming.vestLots : base.vestLots),
+    notes:              incoming.notes ?? base.notes,
     sourceFiles:        [...new Set([...base.sourceFiles, ...incoming.sourceFiles])],
     mergedFromIds:      [...new Set([base.id, incoming.id, ...(base.mergedFromIds ?? []), ...(incoming.mergedFromIds ?? [])])],
     matchConfidence:    computeMatchScore(base, incoming).score,
     vestingSchedule:    base.vestingSchedule ?? incoming.vestingSchedule,
-  };
+  });
 }
 
 /** For originalShareCount: keep the larger value (quarterly statements show shrinking "remaining") */
@@ -185,7 +209,7 @@ export function reconcileGrants(allGrants: GrantRecord[]): GrantRecord[] {
     }
 
     used.add(i);
-    merged.push(current);
+    merged.push(normalizeGrantVesting(current));
   }
 
   return merged;
