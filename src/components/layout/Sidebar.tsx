@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   LayoutDashboard, Upload, TrendingUp, FileText, FolderOpen,
   Lightbulb, Calculator, Bell, BarChart2, ArrowLeftRight, CandlestickChart, Settings, ChevronRight,
-  Lock, X,
+  Lock, X, LineChart,
 } from 'lucide-react';
 import type { AppView } from '../../types';
 import { usePortfolioStore } from '../../store/portfolioStore';
@@ -20,6 +20,7 @@ const navItems: NavItem[] = [
   { id: 'documents',    label: 'Documents',         icon: FolderOpen },
   { id: 'insights',     label: 'AI Insights',       icon: Lightbulb },
   { id: 'whatif',       label: 'What-If / Tax',     icon: Calculator },
+  { id: 'stocks',       label: 'Stocks',            icon: LineChart },
   { id: 'chart',        label: 'Candle Chart',      icon: CandlestickChart },
   { id: 'analytics',    label: 'Analytics',         icon: BarChart2 },
   { id: 'transactions', label: 'Transactions',      icon: ArrowLeftRight },
@@ -184,4 +185,4 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
       </div>
     </aside>
   );
-}
+                             }
