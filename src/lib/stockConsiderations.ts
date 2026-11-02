@@ -24,6 +24,7 @@ export function assess(
   rsu: RsuSummary,
   windows: TradingWindow[],
   filingsNote?: string,
+  rsuDataSuspect = false,
 ): Assessment {
   const considerations: Consideration[] = [];
   if (snap) {
@@ -68,7 +69,7 @@ export function assess(
   if (rsu.grantCount > 0) {
     considerations.push({
       tone: 'neutral',
-      text: `RSU position: ${fmt(rsu.vestedShares, 0)} vested and ${fmt(rsu.unvestedShares, 0)} unvested shares across ${rsu.grantCount} grant(s).`,
+      text: `RSU position as stored: ${fmt(rsu.vestedShares, 0)} vested and ${fmt(rsu.unvestedShares, 0)} unvested shares across ${rsu.grantCount} grant(s).${rsuDataSuspect ? ' The grant data looks inconsistent, so do not rely on these counts until it is checked.' : ''}`,
     });
     if (rsu.nextVest) {
       considerations.push({ tone: 'neutral', text: `Next vest: ${fmt(rsu.nextVest.shares, 0)} shares on ${rsu.nextVest.date}.` });
