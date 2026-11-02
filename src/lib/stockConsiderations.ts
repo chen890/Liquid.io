@@ -81,8 +81,10 @@ export function assess(
   }
   if (filingsNote) considerations.push({ tone: 'neutral', text: filingsNote });
 
-  const up = snap && snap.sma50 != null && snap.last > snap.sma50;
-  const scenarios = [
+  const hasTrend = !!snap && snap.sma50 != null;
+  const up = hasTrend && snap!.last > snap!.sma50!;
+  // Trend scenarios only make sense with an actual 50-period average to compare against.
+  const trendScenarios = !hasTrend ? [] : [
     {
       label: 'If the trend continues',
       text: up
@@ -95,6 +97,9 @@ export function assess(
         ? 'A close below the 50-period average would weaken the current picture.'
         : 'A close back above the 50-period average would improve the current picture.',
     },
+  ];
+  const scenarios = [
+    ...trendScenarios,
     {
       label: 'Concentration risk',
       text: rsu.vestedShares + rsu.unvestedShares > 0
