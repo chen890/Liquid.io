@@ -16,6 +16,7 @@ import { TransactionsView } from './components/views/TransactionsView';
 import { RemindersView } from './components/views/RemindersView';
 import { PortfolioAnalyticsView } from './components/views/PortfolioAnalyticsView';
 import { CandleChartView } from './components/views/CandleChartView';
+import { StocksView } from './components/views/StocksView';
 import { SettingsView } from './components/views/SettingsView';
 import { VaultView } from './components/views/VaultView';
 import { useAuthStore } from './store/authStore';
@@ -41,6 +42,7 @@ function ViewRouter() {
     case 'reminders':    return <RemindersView />;
     case 'analytics':    return <PortfolioAnalyticsView />;
     case 'chart':        return <CandleChartView />;
+    case 'stocks':       return <StocksView />;
     case 'settings':     return <SettingsView />;
     case 'vault':        return <VaultView />;
     default: return <Dashboard />;
