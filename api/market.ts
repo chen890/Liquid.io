@@ -124,6 +124,26 @@ async function memoized<T>(key: string, fn: () => Promise<T>): Promise<T> {
 }
 const inflight = new Map<string, Promise<unknown>>();
 
+const NAME_RE = /^[\p{L}\p{N} .,&'-]{2,80}$/u;
+
+/** Candidate listings for a company name. Never picks one: the caller shows all of them as choices. */
+async function lookup(q: string) {
+  const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=8&newsCount=0`;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const j = (await getJson(url, YAHOO_UA)) as any;
+  const seen = new Set<string>();
+  const candidates = ((j?.quotes ?? []) as Record<string, unknown>[])
+    .filter((x) => x.quoteType === 'EQUITY' && typeof x.symbol === 'string' && TICKER_RE.test(String(x.symbol)))
+    .map((x) => ({
+      symbol: String(x.symbol),
+      name: String(x.longname ?? x.shortname ?? ''),
+      exchange: String(x.exchDisp ?? x.exchange ?? ''),
+    }))
+    .filter((c) => (seen.has(c.symbol) ? false : (seen.add(c.symbol), true)))
+    .slice(0, 6);
+  return { ok: true, source: 'Yahoo Finance search (unofficial)', fetchedAt: new Date().toISOString(), query: q, candidates };
+}
+
 async function news(ticker: string, name: string) {
   const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(ticker)}&newsCount=20&quotesCount=0`;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -256,6 +276,15 @@ async function filings(ticker: string) {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = String(req.query.action ?? '');
+  if (action === 'lookup') {
+    const q = String(req.query.q ?? '').trim();
+    if (!NAME_RE.test(q)) return bad(res, 400, 'Invalid company name');
+    try {
+      return res.status(200).json(await memoized(`l:${q.toLowerCase()}`, () => lookup(q)));
+    } catch {
+      return bad(res, 502, 'Upstream data provider error');
+    }
+  }
   const ticker = String(req.query.ticker ?? '').toUpperCase();
   if (!TICKER_RE.test(ticker)) return bad(res, 400, 'Invalid ticker');
   try {
@@ -280,4 +309,4 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     void e; // do not echo upstream error text to callers
     return bad(res, 502, 'Upstream data provider error');
   }
-                     }
+}
