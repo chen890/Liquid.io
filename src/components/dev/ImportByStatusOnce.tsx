@@ -1,23 +1,26 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { tryParseMorganStanleyByStatusFile } from '../../lib/parsers/morganStanleyByStatus';
 import { usePortfolioStore } from '../../store/portfolioStore';
 
 const FLAG = 'ep_imported_bystatus_v2';
 const FIXTURE = '/fixtures/ByStatus_expanded.xlsx';
 
+// Module-level guard: React StrictMode mounts effects twice with a fresh ref, which ran two imports
+// concurrently and mixed grants of the same ticker. A module variable survives the remount.
+let started = false;
+
 /**
  * DEV helper: once per browser profile, import the Morgan Stanley By Status fixture so
  * Dashboard sellable/vested numbers match the portal without a manual re-upload.
  */
 export function ImportByStatusOnce() {
-  const ran = useRef(false);
   const { setPendingGrants, setPendingSession, importPendingGrants, loadPortfolio } =
     usePortfolioStore();
 
   useEffect(() => {
-    if (!import.meta.env.DEV || ran.current) return;
+    if (!import.meta.env.DEV || started) return;
     if (typeof localStorage !== 'undefined' && localStorage.getItem(FLAG) === '1') return;
-    ran.current = true;
+    started = true;
 
     void (async () => {
       try {
