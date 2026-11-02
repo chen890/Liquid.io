@@ -59,8 +59,13 @@ async function getJson<T>(url: string): Promise<T> {
   return j;
 }
 
-const fmtMoney = (n: number, unit: string) =>
-  unit === 'USD/shares' ? `$${n.toFixed(2)}` : `$${(n / 1e6).toLocaleString('en-US', { maximumFractionDigits: 0 })}M`;
+const fmtMoney = (n: number, unit: string) => {
+  const sign = n < 0 ? '-' : '';
+  const a = Math.abs(n);
+  return unit === 'USD/shares'
+    ? `${sign}$${a.toFixed(2)}`
+    : `${sign}$${(a / 1e6).toLocaleString('en-US', { maximumFractionDigits: 0 })}M`;
+};
 const when = (iso: string) => new Date(iso).toLocaleString();
 
 function StockChart({ candles }: { candles: Candle[] }) {
