@@ -13,7 +13,9 @@
     "preview": "vite preview",
     "server": "cd server && uv run uvicorn main:app --host 0.0.0.0 --port 3712",
     "start": "concurrently \"npm run dev\" \"npm run server\"",
-    "test:import": "node --import ./scripts/register-hook.mjs --experimental-strip-types scripts/regress-import.mts"
+    "test:import": "node --import ./scripts/register-hook.mjs --experimental-strip-types scripts/regress-import.mts",
+    "test:compare": "node --import ./scripts/register-hook.mjs --experimental-strip-types scripts/regress-compare.mts",
+    "test": "npm run test:import && npm run test:compare"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",
