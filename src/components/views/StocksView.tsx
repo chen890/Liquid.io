@@ -184,6 +184,12 @@ function StockChart({ candles }: { candles: Candle[] }) {
 const COMPARE_COLORS = ['#f59e0b', '#22d3ee', '#a78bfa', '#34d399', '#f472b6', '#60a5fa', '#fb7185', '#fbbf24'];
 
 /** One chart for several stocks: percent change from a shared start date, one colored line per stock. */
+function fmtPct(v: number): string {
+  const r = Math.round(v * 10) / 10;
+  if (r === 0) return '0.0%';
+  return `${r > 0 ? '+' : '-'}${Math.abs(r).toFixed(1)}%`;
+}
+
 function ComparisonChart({ tickers }: { tickers: string[] }) {
   const ref = useRef<HTMLDivElement>(null);
   const [rangeIdx, setRangeIdx] = useState(1);
@@ -228,8 +234,8 @@ function ComparisonChart({ tickers }: { tickers: string[] }) {
         color: COMPARE_COLORS[i % COMPARE_COLORS.length],
         lineWidth: 2,
         priceLineVisible: false,
-        lastValueVisible: true,
-        priceFormat: { type: 'custom', formatter: (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`, minMove: 0.1 },
+        lastValueVisible: false,
+        priceFormat: { type: 'custom', formatter: (v: number) => fmtPct(v), minMove: 0.1 },
       });
       line.setData(sr.points.map((p) => ({ time: toTime(p.time), value: p.pct })));
     });
@@ -265,7 +271,7 @@ function ComparisonChart({ tickers }: { tickers: string[] }) {
             <li key={sr.ticker} className="flex items-center gap-2 text-slate-300">
               <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: COMPARE_COLORS[i % COMPARE_COLORS.length] }} />
               <span className="text-white">{sr.ticker}</span>
-              <span className={sr.lastPct! >= 0 ? 'text-emerald-400' : 'text-red-400'}>{sr.lastPct! >= 0 ? '+' : ''}{sr.lastPct!.toFixed(1)}%</span>
+              <span className={Math.round(sr.lastPct! * 10) === 0 ? 'text-slate-300' : sr.lastPct! > 0 ? 'text-emerald-400' : 'text-red-400'}>{fmtPct(sr.lastPct!)}</span>
               <span className="text-xs text-slate-500">to {day(sr.lastTime!)}</span>
             </li>
           ))}
@@ -573,4 +579,4 @@ export function StocksView() {
       ))}
     </div>
   );
-      }
+            }
