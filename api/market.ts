@@ -30,7 +30,7 @@ function bad(res: VercelResponse, code: number, error: string) {
 }
 
 async function getJson(url: string, ua: string): Promise<unknown> {
-  const r = await fetch(url, { headers: { 'User-Agent': ua, Accept: 'application/json' } });
+  const r = await fetch(url, { headers: { 'User-Agent': ua, Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
   if (!r.ok) throw new Error(`HTTP ${r.status} from ${new URL(url).host}`);
   return r.json();
 }
@@ -109,11 +109,20 @@ const MEMO_MS = 5 * 60_000;
 async function memoized<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const hit = memo.get(key);
   if (hit && Date.now() - hit.at < MEMO_MS) return hit.body as T;
-  const body = await fn();
-  if (memo.size > 200) memo.clear();
-  memo.set(key, { at: Date.now(), body });
-  return body;
+  // Coalesce concurrent identical requests into one upstream call (same instance only).
+  const running = inflight.get(key);
+  if (running) return running as Promise<T>;
+  const p = fn()
+    .then((body) => {
+      if (memo.size > 200) memo.clear();
+      memo.set(key, { at: Date.now(), body });
+      return body;
+    })
+    .finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
 }
+const inflight = new Map<string, Promise<unknown>>();
 
 async function news(ticker: string, name: string) {
   const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(ticker)}&newsCount=20&quotesCount=0`;
@@ -268,6 +277,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
     return res.status(200).json(body);
   } catch (e) {
-    return bad(res, 502, e instanceof Error ? e.message : 'Upstream error');
+    void e; // do not echo upstream error text to callers
+    return bad(res, 502, 'Upstream data provider error');
   }
-                                     }
+                     }
