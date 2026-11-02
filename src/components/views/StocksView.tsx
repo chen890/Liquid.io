@@ -11,6 +11,7 @@ import { Card } from '../ui/Card';
 import { detectCompanies, isRsuGrant, summarizeRsu, type DetectedCompany } from '../../lib/stockDetect';
 import { ema, sma, snapshot, type Candle } from '../../lib/indicators';
 import { assess } from '../../lib/stockConsiderations';
+import { computeComparison, type CompareResult } from '../../lib/compare';
 
 interface CandlesResp {
   ok: boolean;
@@ -178,6 +179,103 @@ function StockChart({ candles }: { candles: Candle[] }) {
     return () => { window.removeEventListener('resize', onResize); chart.remove(); };
   }, [candles]);
   return <div ref={ref} className="w-full" />;
+}
+
+const COMPARE_COLORS = ['#f59e0b', '#22d3ee', '#a78bfa', '#34d399', '#f472b6', '#60a5fa', '#fb7185', '#fbbf24'];
+
+/** One chart for several stocks: percent change from a shared start date, one colored line per stock. */
+function ComparisonChart({ tickers }: { tickers: string[] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [rangeIdx, setRangeIdx] = useState(1);
+  const [result, setResult] = useState<CompareResult | null>(null);
+  const [failed, setFailed] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const { range, interval } = RANGES[rangeIdx];
+  const key = tickers.join(',');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    void Promise.allSettled(
+      tickers.map((t) => getJson<CandlesResp>(`/api/market?action=candles&ticker=${encodeURIComponent(t)}&range=${range}&interval=${interval}`)),
+    ).then((res) => {
+      if (cancelled) return;
+      const inputs = tickers.map((t, i) => {
+        const r = res[i];
+        return { ticker: t, candles: r.status === 'fulfilled' ? r.value.candles ?? [] : [] };
+      });
+      setFailed(tickers.filter((_, i) => res[i].status === 'rejected'));
+      setResult(computeComparison(inputs));
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, range, interval]);
+
+  useEffect(() => {
+    if (!ref.current || !result || result.series.every((x) => x.points.length === 0)) return;
+    const chart = createChart(ref.current, {
+      layout: { background: { type: ColorType.Solid, color: '#0f1117' }, textColor: '#64748b', fontSize: 11 },
+      grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
+      width: ref.current.clientWidth,
+      height: 280,
+      timeScale: { timeVisible: false },
+    });
+    const toTime = (t: number) => t as unknown as import('lightweight-charts').Time;
+    result.series.forEach((sr, i) => {
+      if (!sr.points.length) return;
+      const line = chart.addSeries(LineSeries, {
+        color: COMPARE_COLORS[i % COMPARE_COLORS.length],
+        lineWidth: 2,
+        priceLineVisible: false,
+        lastValueVisible: true,
+        priceFormat: { type: 'custom', formatter: (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`, minMove: 0.1 },
+      });
+      line.setData(sr.points.map((p) => ({ time: toTime(p.time), value: p.pct })));
+    });
+    chart.timeScale().fitContent();
+    const onResize = () => ref.current && chart.applyOptions({ width: ref.current.clientWidth });
+    window.addEventListener('resize', onResize);
+    return () => { window.removeEventListener('resize', onResize); chart.remove(); };
+  }, [result]);
+
+  const day = (sec: number) => new Date(sec * 1000).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const drawn = result?.series.filter((x) => x.points.length > 0) ?? [];
+  return (
+    <Card className="p-5 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-lg font-semibold text-white">Comparison</h2>
+          <p className="text-xs text-slate-500">
+            Percent change since {result?.baseTime ? day(result.baseTime) : 'the start of the period'}, so different share prices are comparable. These are not prices.
+          </p>
+        </div>
+        <div className="flex gap-1">
+          {RANGES.map((r, i) => (
+            <button key={r.label} type="button" onClick={() => setRangeIdx(i)}
+              className={`rounded px-2 py-1 text-xs ${i === rangeIdx ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300'}`}>{r.label}</button>
+          ))}
+        </div>
+      </div>
+      {loading && !result && <p className="text-sm text-slate-500">Loading...</p>}
+      {drawn.length > 0 && <div ref={ref} className="w-full" />}
+      {drawn.length > 0 && (
+        <ul className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+          {result!.series.map((sr, i) => sr.points.length > 0 && (
+            <li key={sr.ticker} className="flex items-center gap-2 text-slate-300">
+              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: COMPARE_COLORS[i % COMPARE_COLORS.length] }} />
+              <span className="text-white">{sr.ticker}</span>
+              <span className={sr.lastPct! >= 0 ? 'text-emerald-400' : 'text-red-400'}>{sr.lastPct! >= 0 ? '+' : ''}{sr.lastPct!.toFixed(1)}%</span>
+              <span className="text-xs text-slate-500">to {day(sr.lastTime!)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {(failed.length > 0 || (result?.missing.length ?? 0) > 0) && (
+        <p className="text-xs text-amber-400">No price data for: {[...new Set([...failed, ...(result?.missing ?? [])])].join(', ')} (left out of the chart).</p>
+      )}
+    </Card>
+  );
 }
 
 function CompanySection({ company, onRemove, onPickTicker }: { company: DetectedCompany; onRemove: () => void; onPickTicker?: (name: string, symbol: string) => void }) {
@@ -465,6 +563,9 @@ export function StocksView() {
       {companies.length === 0 && (
         <p className="text-sm text-slate-500">No companies found yet. Upload grant documents or add a ticker.</p>
       )}
+      {companies.filter((c) => c.ticker).length >= 2 && (
+        <ComparisonChart tickers={companies.flatMap((c) => (c.ticker ? [c.ticker] : [])).slice(0, 8)} />
+      )}
       {companies.map((c) => (
         <CompanySection key={c.key} company={c}
           onPickTicker={(name, sym) => setPicked((p) => ({ ...p, [normNameKey(name)]: sym }))}
@@ -472,4 +573,4 @@ export function StocksView() {
       ))}
     </div>
   );
-          }
+      }
