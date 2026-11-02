@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "server": "cd server && uv run uvicorn main:app --host 0.0.0.0 --port 3712",
-    "start": "concurrently \"npm run dev\" \"npm run server\""
+    "start": "concurrently \"npm run dev\" \"npm run server\"",
+    "test:import": "node --import ./scripts/register-hook.mjs --experimental-strip-types scripts/regress-import.mts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",
@@ -45,6 +46,7 @@
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
+    "fake-indexeddb": "^6.2.7",
     "globals": "^17.6.0",
     "typescript-eslint": "^8.59.2"
   }
