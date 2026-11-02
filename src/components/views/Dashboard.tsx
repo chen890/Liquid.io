@@ -124,7 +124,7 @@ function useLivePrices(tickers: string[], refreshKey = 0): {
 // Main component
 // ──────────────────────────────────────────────────────────────────────────────
 export function Dashboard() {
-  const { portfolio, setView } = usePortfolioStore();
+  const { setView } = usePortfolioStore();
   const grants = useWorkingGrants();
   const stats  = useMemo(() => computePortfolioStats(grants), [grants]);
 
