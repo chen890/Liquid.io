@@ -63,7 +63,7 @@ async function candles(ticker: string, range: string, interval: string) {
       currency: m.currency ?? null,
       exchange: m.fullExchangeName ?? null,
       regularMarketPrice: m.regularMarketPrice ?? null,
-      previousClose: m.chartPreviousClose ?? m.previousClose ?? null,
+      previousClose: m.previousClose ?? null, // chartPreviousClose is the close before the range start, so it is not used
       regularMarketTime: m.regularMarketTime ?? null,
       fiftyTwoWeekHigh: m.fiftyTwoWeekHigh ?? null,
       fiftyTwoWeekLow: m.fiftyTwoWeekLow ?? null,
