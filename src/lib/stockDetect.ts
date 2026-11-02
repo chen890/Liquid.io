@@ -54,6 +54,8 @@ export function detectCompanies(
   documents: DocumentRecord[],
   manualTickers: string[] = [],
   removed: string[] = [],
+  /** Tickers the user picked for name-only companies (normalised company name -> ticker). */
+  chosenTickers: Record<string, string> = {},
 ): DetectedCompany[] {
   const byKey = new Map<string, DetectedCompany>();
   const nameToKey = new Map<string, string>();
@@ -61,8 +63,10 @@ export function detectCompanies(
   for (const g of grants) {
     const rawTicker = g.tickerSymbol?.value ? normTicker(g.tickerSymbol.value) : null;
     // A grant field like "RSU" or "USD" is not a ticker; ignore it rather than chart a nonsense symbol.
-    const ticker = rawTicker && VALID.test(rawTicker) && !STOP.has(rawTicker) ? rawTicker : null;
-    const name = g.companyName?.value?.trim() || null;
+    const nameForPick = g.companyName?.value?.trim() || null;
+    const picked = nameForPick ? chosenTickers[normName(nameForPick)] : undefined;
+    const ticker = rawTicker && VALID.test(rawTicker) && !STOP.has(rawTicker) ? rawTicker : picked ? normTicker(picked) : null;
+    const name = nameForPick;
     if (!ticker && !name) continue;
     const key = ticker ?? (nameToKey.get(normName(name!)) ?? `name:${normName(name!)}`);
     let c = byKey.get(key);
@@ -75,6 +79,7 @@ export function detectCompanies(
       if (!c.companyName) c.companyName = name;
     }
     c.grants.push(g);
+    if (picked && ticker === normTicker(picked) && !c.evidence.includes('ticker chosen by you')) c.evidence.push('ticker chosen by you');
     const src = g.tickerSymbol?.sources?.[0] ?? g.companyName?.sources?.[0];
     const ev = src ? `${src.file}${src.page ? ` p.${src.page}` : ''}` : 'extracted grant';
     if (!c.evidence.includes(ev)) c.evidence.push(ev);
@@ -134,4 +139,4 @@ export function summarizeRsu(grants: GrantRecord[], now = new Date()): RsuSummar
     }
   }
   return { grantCount: rsu.length, totalShares: total, vestedShares: vested, unvestedShares: unvested, nextVest: next };
-}
+      }
