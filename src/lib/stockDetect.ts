@@ -59,7 +59,9 @@ export function detectCompanies(
   const nameToKey = new Map<string, string>();
 
   for (const g of grants) {
-    const ticker = g.tickerSymbol?.value ? normTicker(g.tickerSymbol.value) : null;
+    const rawTicker = g.tickerSymbol?.value ? normTicker(g.tickerSymbol.value) : null;
+    // A grant field like "RSU" or "USD" is not a ticker; ignore it rather than chart a nonsense symbol.
+    const ticker = rawTicker && VALID.test(rawTicker) && !STOP.has(rawTicker) ? rawTicker : null;
     const name = g.companyName?.value?.trim() || null;
     if (!ticker && !name) continue;
     const key = ticker ?? (nameToKey.get(normName(name!)) ?? `name:${normName(name!)}`);
@@ -132,4 +134,4 @@ export function summarizeRsu(grants: GrantRecord[], now = new Date()): RsuSummar
     }
   }
   return { grantCount: rsu.length, totalShares: total, vestedShares: vested, unvestedShares: unvested, nextVest: next };
-                                                                                         }
+}
