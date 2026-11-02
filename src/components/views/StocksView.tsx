@@ -70,6 +70,51 @@ const RANGES = [
 
 const LS_MANUAL = 'equitylens.stocks.manual';
 const LS_REMOVED = 'equitylens.stocks.removed';
+const LS_PICKED = 'equitylens.stocks.picked';
+const normNameKey = (n: string) =>
+  n.toLowerCase().replace(/[.,]/g, '').replace(/\b(inc|corp|corporation|ltd|limited|plc|co|company|holdings|n\.v|nv)\b/g, '').replace(/\s+/g, ' ').trim();
+const readMap = (k: string): Record<string, string> => {
+  try { return JSON.parse(localStorage.getItem(k) ?? '{}') as Record<string, string>; } catch { return {}; }
+};
+
+interface Candidate { symbol: string; name: string; exchange: string }
+
+/** Name-only company: lists possible listings and lets the user choose. Never selects one itself. */
+function TickerPicker({ name, onPick }: { name: string; onPick: (symbol: string) => void }) {
+  const [cands, setCands] = useState<Candidate[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const find = async () => {
+    setBusy(true); setErr('');
+    try {
+      const r = await getJson<{ candidates: Candidate[] }>(`/api/market?action=lookup&q=${encodeURIComponent(name)}`);
+      setCands(r.candidates);
+    } catch { setErr('Lookup failed. You can still type the ticker above.'); } finally { setBusy(false); }
+  };
+  return (
+    <div className="space-y-2 text-sm">
+      <button type="button" onClick={() => void find()} disabled={busy} className="rounded-lg bg-slate-800 px-3 py-1.5 text-white">
+        {busy ? 'Searching...' : 'Find ticker'}
+      </button>
+      {err && <p className="text-red-400">{err}</p>}
+      {cands && cands.length === 0 && <p className="text-slate-400">No match found. Type the ticker above.</p>}
+      {cands && cands.length > 0 && (
+        <div>
+          <p className="text-slate-400">Possible matches. Nothing is chosen until you pick one:</p>
+          <ul className="mt-1 space-y-1">
+            {cands.map((c) => (
+              <li key={c.symbol} className="flex items-center gap-2">
+                <span className="text-white">{c.symbol}</span>
+                <span className="text-slate-400">{c.name} {c.exchange && `(${c.exchange})`}</span>
+                <button type="button" onClick={() => onPick(c.symbol)} className="rounded bg-indigo-600 px-2 py-0.5 text-white">Use this</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
 const readList = (k: string): string[] => {
   try { return JSON.parse(localStorage.getItem(k) ?? '[]') as string[]; } catch { return []; }
 };
@@ -135,7 +180,7 @@ function StockChart({ candles }: { candles: Candle[] }) {
   return <div ref={ref} className="w-full" />;
 }
 
-function CompanySection({ company, onRemove }: { company: DetectedCompany; onRemove: () => void }) {
+function CompanySection({ company, onRemove, onPickTicker }: { company: DetectedCompany; onRemove: () => void; onPickTicker?: (name: string, symbol: string) => void }) {
   const tradingWindows = usePortfolioStore((s) => s.portfolio.tradingWindows);
   const [rangeIdx, setRangeIdx] = useState(1);
   const [prices, setPrices] = useState<CandlesResp | null>(null);
@@ -217,8 +262,11 @@ function CompanySection({ company, onRemove }: { company: DetectedCompany; onRem
 
       {!ticker && (
         <p className="text-sm text-amber-400">
-          Company "{company.companyName}" has no ticker in your data. Add its ticker above to load charts.
+          Company "{company.companyName}" has no ticker in your data. Add its ticker above, or find it by name.
         </p>
+      )}
+      {!ticker && company.companyName && onPickTicker && (
+        <TickerPicker name={company.companyName} onPick={(sym) => onPickTicker(company.companyName!, sym)} />
       )}
 
       <div className="grid gap-3 sm:grid-cols-4 text-sm">
@@ -380,12 +428,14 @@ export function StocksView() {
   const documents = usePortfolioStore((s) => s.portfolio.documents);
   const [manual, setManual] = useState<string[]>(() => readList(LS_MANUAL));
   const [removed, setRemoved] = useState<string[]>(() => readList(LS_REMOVED));
+  const [picked, setPicked] = useState<Record<string, string>>(() => readMap(LS_PICKED));
   const [input, setInput] = useState('');
 
+  useEffect(() => { localStorage.setItem(LS_PICKED, JSON.stringify(picked)); }, [picked]);
   useEffect(() => { localStorage.setItem(LS_MANUAL, JSON.stringify(manual)); }, [manual]);
   useEffect(() => { localStorage.setItem(LS_REMOVED, JSON.stringify(removed)); }, [removed]);
 
-  const companies = useMemo(() => detectCompanies(grants, documents, manual, removed), [grants, documents, manual, removed]);
+  const companies = useMemo(() => detectCompanies(grants, documents, manual, removed, picked), [grants, documents, manual, removed, picked]);
 
   const add = () => {
     const t = input.trim().toUpperCase().replace(/^\$/, '');
@@ -417,8 +467,9 @@ export function StocksView() {
       )}
       {companies.map((c) => (
         <CompanySection key={c.key} company={c}
+          onPickTicker={(name, sym) => setPicked((p) => ({ ...p, [normNameKey(name)]: sym }))}
           onRemove={() => { if (c.ticker) setRemoved((r) => [...r, c.ticker!]); setManual((m) => m.filter((x) => x !== c.ticker)); }} />
       ))}
     </div>
   );
-                }
+          }
