@@ -70,6 +70,15 @@ const emptyPortfolio: Portfolio = {
   lastUpdated: new Date().toISOString(),
 };
 
+// Storage writers (import, load-with-normalise) run one at a time. loadPortfolio reads the grants and then
+// writes them back; if an import landed in between, that write-back could overwrite it.
+let storeQueue: Promise<unknown> = Promise.resolve();
+function exclusive<T>(fn: () => Promise<T>): Promise<T> {
+  const run = storeQueue.then(fn, fn);
+  storeQueue = run.catch(() => undefined);
+  return run;
+}
+
 export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   portfolio: emptyPortfolio,
   currentView: 'dashboard',
@@ -79,14 +88,14 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   isProcessing: false,
   processingLog: [],
 
-  loadPortfolio: async () => {
+  loadPortfolio: () => exclusive(async () => {
     set({ isLoading: true });
     const portfolio = await storage.loadPortfolio();
     // Re-derive vested/unvested for grants saved before vesting normalization.
     const grants = portfolio.grants.map(normalizeGrantVesting);
     await Promise.all(grants.map((g) => storage.saveGrant(g)));
     set({ portfolio: { ...portfolio, grants }, isLoading: false });
-  },
+  }),
 
   setView: (view) => set({ currentView: view }),
 
@@ -109,7 +118,7 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   setPendingGrants: (grants) => set({ pendingGrants: grants }),
   setPendingSession: (session) => set({ pendingSession: session }),
 
-  importPendingGrants: async () => {
+  importPendingGrants: () => exclusive(async () => {
     const { pendingGrants, pendingSession } = get();
     if (pendingGrants.length === 0) return;
 
@@ -134,7 +143,7 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
       pendingGrants: [],
       pendingSession: null,
     }));
-  },
+  }),
 
   deleteGrant: async (id) => {
     await storage.deleteGrant(id);

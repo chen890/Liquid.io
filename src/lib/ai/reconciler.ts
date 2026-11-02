@@ -33,6 +33,10 @@ export function computeMatchScore(a: GrantRecord, b: GrantRecord): MatchResult {
     if (normalizeGrantId(a.grantId.value) === normalizeGrantId(b.grantId.value)) {
       score += 60;
       reasons.push('Grant ID match');
+    } else {
+      // Two different grant IDs are two different grants, even when date, size and ticker look alike.
+      // Without this, same-company grants could score past the merge threshold and be mixed together.
+      return { score: 0, reasons: ['Different grant IDs'] };
     }
   }
 
@@ -256,12 +260,13 @@ export function deduplicateAgainstPortfolio(
 
       // Skip if the new grant's source file is already listed on the existing grant
       // (means this exact extraction was already imported before)
-      const alreadyImported = newGrant.sourceFiles.every((f) =>
-        existingGrant.sourceFiles.includes(f),
-      );
-      if (alreadyImported) { bestScore = 100; bestMatch = existingGrant; break; }
-
-      const { score } = computeMatchScore(newGrant, existingGrant);
+      const { score: matchScore } = computeMatchScore(newGrant, existingGrant);
+      const idsConflict = matchScore === 0 && !!newGrant.grantId?.value && !!existingGrant.grantId?.value;
+      const alreadyImported =
+        !idsConflict && newGrant.sourceFiles.every((f) => existingGrant.sourceFiles.includes(f));
+      // Same-file rows only count as a re-import of THIS grant when the grant IDs do not conflict. Scoring all
+      // candidates (no early break) keeps the pairing deterministic instead of depending on storage order.
+      const score = alreadyImported ? 100 + matchScore : matchScore;
       if (score > bestScore) { bestScore = score; bestMatch = existingGrant; }
     }
 
