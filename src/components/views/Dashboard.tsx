@@ -10,6 +10,7 @@ import { computePortfolioStats } from '../../lib/insights';
 import { getAllVestingEvents, groupByMonth } from '../../lib/vestingSchedule';
 import { resolveVestingCounts } from '../../lib/vestingCounts';
 import { VestedInsights } from './VestedInsights';
+import { PortfolioChat } from './PortfolioChat';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -274,6 +275,13 @@ export function Dashboard() {
           icon={TrendingUp} accent="bg-amber-600"
         />
       </div>
+
+      <PortfolioChat
+        grants={grants}
+        livePrices={Object.fromEntries(
+          Object.entries(livePrices).map(([t, v]) => [t, v.price]),
+        )}
+      />
 
       {/* Vesting timeline + pie */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
