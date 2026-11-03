@@ -538,6 +538,10 @@ _candles.register(app)
 _market_ctx = _il.import_module("market_context_route")
 _market_ctx.register(app)
 
+# Stocks view: /api/market (candles / news / filings / lookup) — mirrors api/market.ts
+_market = _il.import_module("market_route")
+_market.register(app)
+
 
 class ExtractRequest(BaseModel):
     filename: str
